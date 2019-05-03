@@ -11,3 +11,6 @@
 *.egg
 #*.zip
 *._*
+
+# VS Code
+.vscode/

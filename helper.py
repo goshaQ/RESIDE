@@ -7,33 +7,120 @@ from nltk.tokenize import word_tokenize
 from pprint import pprint
 from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
 
+import bert
+import tensorflow as tf
+import tensorflow_hub as hub
+
 # Set precision for numpy
 np.set_printoptions(precision=4)
 
 
-def getEmbeddings(model, wrd_list, embed_dims):
+def getEmbeddings(model, input_list):
     """
-    Gives embedding for each word in wrd_list
+    Gives embedding for each word in input_list
 
     Parameters
     ----------
-    model:		Word2vec model
-    wrd_list:	List of words for which embedding is required
-    embed_dims:	Dimension of the embedding
+    model:		BERT model
+    input_list:	List of inputs for which embedding is required
 
     Returns
     -------
-    embed_matrix:	(len(wrd_list) x embed_dims) matrix containing embedding for each word in wrd_list in the same order
+    embed_matrix:	(len(input_list) x BERT hidden dim) matrix containing embedding
+                    for each word in input_list in the same order
     """
     embed_list = []
 
-    for wrd in wrd_list:
-        if wrd in model.vocab:
-            embed_list.append(model.word_vec(wrd))
-        else:
-            embed_list.append(np.random.randn(embed_dims))  # Generates a random vector for words not in vocab
+    for input_ in input_list:
+        embed = model(inputs=input_,
+                      as_dict=True,
+                      signature='tokens')
+        embed_list.append(embed)
 
     return np.array(embed_list, dtype=np.float32)
+
+
+def prepareInput(tokenizer, sentence, max_seq_length):
+    """
+    Converts a sentence to the format expected by BERT model
+
+    Parameters
+    ----------
+    tokenizer:	BERT tokenizer
+    sentence:	Sentence to be preprocessed
+
+    Returns
+    -------
+    preprocessed:  	dictionary with input_ids, input_mask, and segment_ids
+    """
+    tokenized_sentence = tokenizer.tokenize(sentence)
+
+    tokens = []
+    segment_ids = []
+    tokens.append('[CLS]')
+    segment_ids.append(0)
+    for token in tokenized_sentence:
+        tokens.append(token)
+        segment_ids.append(0)
+    tokens.append('[SEP]')
+    segment_ids.append(0)
+
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+    input_mask = [1] * len(input_ids)
+
+    while len(input_ids) < max_seq_length:
+        input_ids.append(0)
+        input_mask.append(0)
+        segment_ids.append(0)
+
+    # Check that the length of sequences is not higher than `max_seq_length`
+    assert len(input_ids) == max_seq_length
+    assert len(input_mask) == max_seq_length
+    assert len(segment_ids) == max_seq_length
+
+    return {
+        'input_ids': [input_ids],
+        'input_mask': [input_mask],
+        'segment_ids': [segment_ids],
+    }
+
+
+def createModel(bert_model_hub, trainable=False):
+    """
+    Get BERT model from the Hub module
+
+    Parameters
+    ----------
+    bert_model_hub: Path to the pretrained BERT module.
+
+    Returns
+    -------
+    model:  BERT model
+    """
+    return hub.Module(bert_model_hub, trainable=trainable)
+
+
+def createTokenizer(bert_model_hub):
+    """
+    Get the vocab file and casing info from the Hub module
+
+    Parameters
+    ----------
+    bert_model_hub: Path to the pretrained BERT module.
+
+    Returns
+    -------
+    tokenizer: FullTokenizer object
+    """
+    with tf.Graph().as_default():
+        bert_module = hub.Module(bert_model_hub)
+        tokenization_info = bert_module(signature='tokenization_info', as_dict=True)
+        with tf.Session() as sess:
+            vocab_file, do_lower_case = sess.run([tokenization_info['vocab_file'],
+                                                  tokenization_info['do_lower_case']])
+    
+    return bert.tokenization.FullTokenizer(
+        vocab_file=vocab_file, do_lower_case=do_lower_case)
 
 
 def getPhr2vec(model, phr_list, embed_dims):
@@ -67,6 +154,36 @@ def getPhr2vec(model, phr_list, embed_dims):
 
     return np.array(embed_list)
 
+
+def getPhr2BERT(model, phr_list, embed_dims):
+    """
+    Gives embedding for each phrase in phr_list
+
+    Parameters
+    ----------
+    model:		BERT model
+    phr_list:	List of words for which embedding is required
+
+    Returns
+    -------
+    embed_matrix:	(len(phr_list) x embed_dims) matrix containing embedding for each phrase in the phr_list in the same order
+    """
+    embed_list = []
+
+    for phr in phr_list:
+        print('PHR')
+        vec = np.zeros(embed_dims, np.float32)
+        sequence_output, pooled_output = model(
+            inputs=phr,
+            as_dict=True,
+            signature='tokens')
+
+        with tf.Session().as_default() as sess:
+            result = sess.run([sequence_output, pooled_output])
+        print(result)
+        break
+
+        embed_list.append(model)
 
 def set_gpu(gpus):
     """

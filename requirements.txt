@@ -6,3 +6,5 @@ scipy==1.0.0
 nltk==3.3
 scikit_learn==0.20.0
 orderedset==2.0.1
+bert-tensorflow==1.0.1
+tensorflow-hub==0.4.0

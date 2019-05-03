@@ -1,5 +1,8 @@
-from helper import *
 import tensorflow as tf
+import tensorflow_hub as hub
+
+from helper import *
+from bert.modeling import BertModel
 
 """
 Abbreviations used in variable names:
@@ -27,7 +30,7 @@ class RESIDE(object):
         if shuffle: random.shuffle(data)
 
         for chunk in getChunks(data, self.p.batch_size):  # chunk = batch
-            batch = ddict(list)
+            batch = defaultdict(list)
 
             num = 0
             for i, bag in enumerate(chunk):
@@ -568,6 +571,9 @@ class RESIDE(object):
         in_wrds, in_pos1, in_pos2 = self.input_x, self.input_pos1, self.input_pos2
 
         with tf.variable_scope('Embeddings') as scope:
+            model = hub.Module(self.p.pretrained_bert_model, trainable=True)
+            ...
+
             model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
             embed_init = getEmbeddings(model, self.wrd_list, self.p.embed_dim)
             _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
@@ -1017,41 +1023,66 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Improving Distantly-Supervised Neural Relation Extraction using Side Information')
 
-    parser.add_argument('-data', dest="dataset", required=True, help='Dataset to use')
-    parser.add_argument('-gpu', dest="gpu", default='0', help='GPU to use')
-    parser.add_argument('-nGate', dest="wGate", action='store_false', help='Include edgewise-gating in GCN')
+    parser.add_argument('--data', dest="dataset", required=True,
+                        help='Dataset to use')
+    parser.add_argument('--gpu', dest="gpu", default='0',
+                        help='GPU to use')
+    parser.add_argument('--nGate', dest="wGate", action='store_false',
+                        help='Include edgewise-gating in GCN')
 
-    parser.add_argument('-lstm_dim', dest="lstm_dim", default=192, type=int, help='Hidden state dimension of Bi-LSTM')
-    parser.add_argument('-pos_dim', dest="pos_dim", default=16, type=int, help='Dimension of positional embeddings')
-    parser.add_argument('-type_dim', dest="type_dim", default=50, type=int, help='Type dimension')
-    parser.add_argument('-alias_dim', dest="alias_dim", default=32, type=int, help='Alias dimension')
-    parser.add_argument('-de_dim', dest="de_gcn_dim", default=16, type=int,
+    parser.add_argument('--lstm_dim', dest="lstm_dim", default=192, type=int,
+                        help='Hidden state dimension of Bi-LSTM')
+    parser.add_argument('--pos_dim', dest="pos_dim", default=16, type=int,
+                        help='Dimension of positional embeddings')
+    parser.add_argument('--type_dim', dest="type_dim", default=50, type=int,
+                        help='Type dimension')
+    parser.add_argument('--alias_dim', dest="alias_dim", default=32, type=int,
+                        help='Alias dimension')
+    parser.add_argument('--de_dim', dest="de_gcn_dim", default=16, type=int,
                         help='Hidden state dimension of GCN over dependency tree')
 
-    parser.add_argument('-de_layer', dest="de_layers", default=1, type=int,
+    parser.add_argument('--de_layer', dest="de_layers", default=1, type=int,
                         help='Number of layers in GCN over dependency tree')
-    parser.add_argument('-drop', dest="dropout", default=0.8, type=float, help='Dropout for full connected layer')
-    parser.add_argument('-rdrop', dest="rec_dropout", default=0.8, type=float, help='Recurrent dropout for LSTM')
+    parser.add_argument('--drop', dest="dropout", default=0.8, type=float,
+                        help='Dropout for full connected layer')
+    parser.add_argument('--rdrop', dest="rec_dropout", default=0.8, type=float,
+                        help='Recurrent dropout for LSTM')
 
-    parser.add_argument('-lr', dest="lr", default=0.001, type=float, help='Learning rate')
-    parser.add_argument('-l2', dest="l2", default=0.001, type=float, help='L2 regularization')
-    parser.add_argument('-epoch', dest="max_epochs", default=2, type=int, help='Max epochs')
-    parser.add_argument('-batch', dest="batch_size", default=32, type=int, help='Batch size')
-    parser.add_argument('-chunk', dest="chunk_size", default=1000, type=int, help='Chunk size')
-    parser.add_argument('-restore', dest="restore", action='store_true',
+    parser.add_argument('--lr', dest="lr", default=0.001, type=float,
+                        help='Learning rate')
+    parser.add_argument('--l2', dest="l2", default=0.001, type=float,
+                        help='L2 regularization')
+    parser.add_argument('--epoch', dest="max_epochs", default=2, type=int,
+                        help='Max epochs')
+    parser.add_argument('--batch', dest="batch_size", default=32, type=int,
+                        help='Batch size')
+    parser.add_argument('--chunk', dest="chunk_size", default=1000, type=int,
+                        help='Chunk size')
+    parser.add_argument('--restore', dest="restore", action='store_true',
                         help='Restore from the previous best saved model')
-    parser.add_argument('-only_eval', dest="only_eval", action='store_true',
+    parser.add_argument('--only_eval', dest="only_eval", action='store_true',
                         help='Only Evaluate the pretrained model (skip training)')
-    parser.add_argument('-opt', dest="opt", default='adam', help='Optimizer to use for training')
+    parser.add_argument('--opt', dest="opt", default='adam',
+                        help='Optimizer to use for training')
 
-    parser.add_argument('-eps', dest="eps", default=0.00000001, type=float, help='Value of epsilon')
-    parser.add_argument('-name', dest="name", default='test_' + str(uuid.uuid4()), help='Name of the run')
-    parser.add_argument('-seed', dest="seed", default=1234, type=int, help='Seed for randomization')
-    parser.add_argument('-logdir', dest="log_dir", default='./log/', help='Log directory')
-    parser.add_argument('-config', dest="config_dir", default='./config/', help='Config directory')
-    parser.add_argument('-embed_loc', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt',
+    parser.add_argument('--eps', dest="eps", default=0.00000001, type=float,
+                        help='Value of epsilon')
+    parser.add_argument('--name', dest="name", default='test_' + str(uuid.uuid4()),
+                        help='Name of the run')
+    parser.add_argument('--seed', dest="seed", default=1234, type=int,
+                        help='Seed for randomization')
+    parser.add_argument('--logdir', dest="log_dir", default='./log/',
                         help='Log directory')
-    parser.add_argument('-embed_dim', dest="embed_dim", default=50, type=int, help='Dimension of embedding')
+    parser.add_argument('--config', dest="config_dir", default='./config/',
+                        help='Config directory')
+    parser.add_argument('--embed_loc', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt',
+                        help='Log directory')
+    parser.add_argument('--embed_dim', dest="embed_dim", default=50, type=int,
+                        help='Dimension of embedding')
+
+    parser.add_argument('--pretrained-bert-model',
+                        default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
+                        help='Path to the pretrained BERT model on TF Hub')
     args = parser.parse_args()
 
     if not args.restore: args.name = args.name

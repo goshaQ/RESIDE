@@ -7,38 +7,55 @@ from scipy.spatial.distance import cdist
 from joblib import Parallel, delayed
 from orderedset import OrderedSet
 
+from collections import defaultdict
+from bert import run_classifier_with_tfhub
+import tensorflow_hub as hub
+
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
-parser.add_argument('-test', dest="FULL", action='store_false')
-parser.add_argument('-pos', dest="MAX_POS", default=60, type=int,
+parser.add_argument('--test', dest="FULL", action='store_false')
+parser.add_argument('--pos', dest="MAX_POS", default=60, type=int,
                     help='Max position to consider for positional embeddings')
-parser.add_argument('-mvoc', dest="MAX_VOCAB", default=150000, type=int, help='Maximum vocabulary to consider')
-parser.add_argument('-maxw', dest="MAX_WORDS", default=100, type=int)
-parser.add_argument('-minw', dest="MIN_WORDS", default=5, type=int)
-parser.add_argument('-num', dest="num_procs", default=40, type=int)
-parser.add_argument('-thresh', dest="thresh", default=0.65, type=float)
-parser.add_argument('-nfinetype', dest='wFineType', action='store_false')
-parser.add_argument('-metric', default='cosine')
-parser.add_argument('-data', default='riedel')
+parser.add_argument('--mvoc', dest="MAX_VOCAB", default=150000, type=int,
+					help='Maximum vocabulary to consider')
+parser.add_argument('--maxw', dest="MAX_WORDS", default=100, type=int)
+parser.add_argument('--minw', dest="MIN_WORDS", default=5, type=int)
+parser.add_argument('--num', dest="num_procs", default=40, type=int)
+parser.add_argument('--thresh', dest="thresh", default=0.65, type=float)
+parser.add_argument('--nfinetype', dest='wFineType', action='store_false')
+parser.add_argument('--metric', default='cosine')
+parser.add_argument('--data', default='riedel')
 
 # Change the below two arguments together
-parser.add_argument('-embed', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt')
-parser.add_argument('-embed_dim', default=50, type=int)
+parser.add_argument('--embed', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt')
+parser.add_argument('--embed_dim', default=50, type=int)
+parser.add_argument('--max_seq_length', default=128, type=int,
+                    help='The length of sequence tokens')
+parser.add_argument('--pretrained-bert-model',
+                    default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
+                    help='Path to the pretrained BERT model on TF Hub')
 
 # Below arguments can be used for testing processing script (process a part of data instead of full)
-parser.add_argument('-sample', dest='FULL', action='store_false', help='To process the entire data or a sample of it')
-parser.add_argument('-samp_size', dest='sample_size', default=200, type=int,
+parser.add_argument('--sample', dest='FULL', action='store_false',
+					help='To process the entire data or a sample of it')
+parser.add_argument('--samp_size', dest='sample_size', default=200, type=int,
                     help='Sample size to use for testing processing script')
 args = parser.parse_args()
 
 print('Starting Data Pre-processing script...')
-ent2type = json.loads(open('./side_info/entity_type/{}/type_info.json'.format(args.data)).read())
-rel2alias = json.loads(
-    open('./side_info/relation_alias/{}/relation_alias_from_wikidata_ppdb_extended.json'.format(args.data)).read())
-rel2id = json.loads(open('./preproc/{}_relation2id.json'.format(args.data)).read())
+
+with open(f'./side_info/entity_type/{args.data}/type_info.json') as f:
+	ent2type = json.load(f)
+with open(f'./side_info/relation_alias/{args.data}/relation_alias_from_wikidata_ppdb_extended.json') as f:
+	rel2alias = json.load(f)
+with open(f'./preproc/{args.data}_relation2id.json') as f:
+	rel2id = json.load(f)
+
 id2rel = dict([(v, k) for k, v in rel2id.items()])
-alias2rel = ddict(set)
+alias2rel = defaultdict(set)
 alias2id = {}
-embed_model = gensim.models.KeyedVectors.load_word2vec_format(args.embed_loc, binary=False)
+
+embed_model = createModel(args.pretrained_bert_model)
+tokenizer = createTokenizer(args.pretrained_bert_model)
 
 for rel, aliases in rel2alias.items():
     for alias in aliases:
@@ -49,10 +66,13 @@ for rel, aliases in rel2alias.items():
             alias2rel[alias2id[alias]].add(rel)
 
 temp = sorted(alias2id.items(), key=lambda x: x[1])
-temp.sort(key=lambda x: x[1])
 alias_list, _ = zip(*temp)
-alias_embed = getPhr2vec(embed_model, alias_list, args.embed_dim)
+alias_list = [prepareInput(tokenizer, alias, args.max_seq_length) for alias in alias_list]
+alias_embed = getPhr2BERT(embed_model, alias_list, args.embed_dim)
 id2alias = dict([(v, k) for k, v in alias2id.items()])
+
+from pprint import pprint
+pprint('ALIAS', alias_embed)
 
 data = {
     'train': [],
@@ -126,7 +146,7 @@ def read_file(file_path):
                 spans = [sub_off[0]] + [obj_off[0]]
                 off_begin, off_end, _ = zip(*spans)
 
-                tid_map, tid2wrd = ddict(dict), ddict(list)
+                tid_map, tid2wrd = defaultdict(dict), defaultdict(list)
 
                 tok_idx = 1
                 sub_pos, obj_pos = None, None
@@ -331,7 +351,7 @@ for res in results:
         pdb.set_trace()
 
 """*************************** FORM VOCABULARY **************************"""
-voc_freq = ddict(int)
+voc_freq = defaultdict(int)
 for bag in data['train']:
     for wrds in bag['wrds_list']:
         for wrd in wrds: voc_freq[wrd] += 1
@@ -345,7 +365,7 @@ vocab.append('UNK')
 
 """*************************** WORD 2 ID MAPPING **************************"""
 
-
+# TODO (goshaQ): Replace with tokenizer
 def getIdMap(vals, begin_idx=0):
     ele2id = {}
     for id, ele in enumerate(vals):
