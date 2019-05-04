@@ -16,7 +16,7 @@ from nltk.tokenize import word_tokenize
 np.set_printoptions(precision=4)
 
 
-def getEmbeddings(model, input_list):
+def getBERTEmbeddings(model, wrd_list):
     """
     Gives embedding for each word in input_list
 
@@ -32,11 +32,9 @@ def getEmbeddings(model, input_list):
     """
     embed_list = []
 
-    for input_ in input_list:
-        embed = model(inputs=input_,
-                      as_dict=True,
-                      signature='tokens')
-        embed_list.append(embed)
+    embed = model(inputs=prepareInput(wrd_list),
+                    as_dict=True,
+                    signature='tokens')
 
     return np.array(embed_list, dtype=np.float32)
 
@@ -64,48 +62,58 @@ def getGloveEmbeddings(model, wrd_list, embed_dims):
     return np.array(embed_list, dtype=np.float32)
 
 
-def prepareInput(tokenizer, sentence, max_seq_length):
+def prepareInput(tokenizer, sentences, max_seq_length):
     """
-    Converts a sentence to the format expected by BERT model
+    Converts a set of sentences to the format expected by BERT model
 
     Parameters
     ----------
     tokenizer:	BERT tokenizer
-    sentence:	Sentence to be preprocessed
+    sentences:	Set of sentences to be preprocessed
 
     Returns
     -------
     preprocessed:  	dictionary with input_ids, input_mask, and segment_ids
     """
-    tokenized_sentence = tokenizer.tokenize(sentence)
 
-    tokens = []
-    segment_ids = []
-    tokens.append('[CLS]')
-    segment_ids.append(0)
-    for token in tokenized_sentence:
-        tokens.append(token)
+    list_input_ids = []
+    list_input_mask = []
+    list_segment_ids = []
+
+    for sentence in sentences:
+        tokenized_sentence = tokenizer.tokenize(sentence)
+
+        tokens = []
+        segment_ids = []
+        tokens.append('[CLS]')
         segment_ids.append(0)
-    tokens.append('[SEP]')
-    segment_ids.append(0)
-
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-    input_mask = [1] * len(input_ids)
-
-    while len(input_ids) < max_seq_length:
-        input_ids.append(0)
-        input_mask.append(0)
+        for token in tokenized_sentence:
+            tokens.append(token)
+            segment_ids.append(0)
+        tokens.append('[SEP]')
         segment_ids.append(0)
 
-    # Check that the length of sequences is not higher than `max_seq_length`
-    assert len(input_ids) == max_seq_length
-    assert len(input_mask) == max_seq_length
-    assert len(segment_ids) == max_seq_length
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+        input_mask = [1] * len(input_ids)
+
+        while len(input_ids) < max_seq_length:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+
+        # Check that the length of sequences is not higher than `max_seq_length`
+        assert len(input_ids) == max_seq_length
+        assert len(input_mask) == max_seq_length
+        assert len(segment_ids) == max_seq_length
+        
+        list_input_ids.append(input_ids)
+        list_input_mask.append(input_mask)
+        list_segment_ids.append(segment_ids)
 
     return {
-        'input_ids': [input_ids],
-        'input_mask': [input_mask],
-        'segment_ids': [segment_ids],
+        'input_ids': list_input_ids,
+        'input_mask': list_input_mask,
+        'segment_ids': list_segment_ids,
     }
 
 

@@ -14,7 +14,14 @@ from sklearn.metrics import average_precision_score
 
 from bert.modeling import BertModel
 
-from helper import getChunks, getGloveEmbeddings, get_logger, make_dir, set_gpu, getEmbeddings
+from helper import (
+    getBERTEmbeddings,
+    getGloveEmbeddings,
+    getChunks,
+    get_logger,
+    make_dir,
+    set_gpu,
+)
 
 """
 Abbreviations used in variable names:
@@ -586,9 +593,11 @@ class RESIDE(object):
 
             if self.p.embed_type == 'BERT':
                 model = hub.Module(self.p.pretrained_bert_model, trainable=True)
+                embed_init = getBERTEmbeddings
                 ...
 
-                embed_init = getEmbeddings(model, self.wrd_list)
+                model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
+                embed_init = getGloveEmbeddings(model, self.wrd_list, self.p.embed_dim)
                 _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
                                                   regularizer=self.regularizer)
                 wrd_pad = tf.zeros([1, self.p.embed_dim])
@@ -622,6 +631,7 @@ class RESIDE(object):
             alias_av = tf.divide(tf.reduce_sum(alias_embed, axis=1), tf.expand_dims(self.input_proby_len, axis=1))
 
         wrd_embed = tf.nn.embedding_lookup(wrd_embeddings, in_wrds)
+        print('SHAPE', wrd_embeddings.shape)
         pos1_embed = tf.nn.embedding_lookup(pos1_embeddings, in_pos1)
         pos2_embed = tf.nn.embedding_lookup(pos2_embeddings, in_pos2)
         embeds = tf.concat([wrd_embed, pos1_embed, pos2_embed], axis=2)
