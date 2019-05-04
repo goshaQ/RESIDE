@@ -1,9 +1,16 @@
-import sys;
+import json
+import re
+import sys
+from collections import defaultdict
+from pprint import pprint
 
-sys.path.insert(0, './')
-from helper import *
+import gensim
+import numpy as np
 import tensorflow as tf
 from scipy.spatial.distance import cdist
+
+sys.path.insert(0, './')
+from helper import getPhr2vec, get_logger
 
 
 class Base(object):
@@ -72,7 +79,7 @@ class Base(object):
         sub_type = list({self.type2id[typ.split('/')[1]] for typ in self.ent2type[bag['sub_id']]})
         obj_type = list({self.type2id[typ.split('/')[1]] for typ in self.ent2type[bag['obj_id']]})
 
-        batch, num = ddict(list), 0
+        batch, num = defaultdict(list), 0
 
         sub_words = re.split("_|- ", sub)
         obj_words = re.split("_|- ", obj)
@@ -98,7 +105,6 @@ class Base(object):
                     if openie['subject'].lower() == sub.replace('_', ' ') and openie['object'].lower() == obj.replace(
                             '_', ' '):
                         phrases.add(openie['relation'])
-            openie_phrases = phrases.copy()
 
             if abs(sub_pos - obj_pos) < 5:
                 middle_phr = ' '.join(tok_list[min(sub_pos, obj_pos) + 1: max(sub_pos, obj_pos)])
@@ -119,14 +125,14 @@ class Base(object):
 
             for edge in dep_links:
                 if edge[0] == sub_pos or edge[0] == obj_pos:
-                    if edge[1] > min(sub_pos, obj_pos) and edge[1] < max(sub_pos, obj_pos):
+                    if min(sub_pos, obj_pos) < edge[1] < max(sub_pos, obj_pos):
                         mid_phrase.add(tok_list[edge[1]])
                     elif edge[1] < min(sub_pos, obj_pos):
                         left_nbd_phrase.add(tok_list[edge[1]])
                     else:
                         right_nbd_phrase.add(tok_list[edge[1]])
                 if edge[1] == sub_pos or edge[1] == obj_pos:
-                    if edge[0] > min(sub_pos, obj_pos) and edge[0] < max(sub_pos, obj_pos):
+                    if min(sub_pos, obj_pos) < edge[0] < max(sub_pos, obj_pos):
                         mid_phrase.add(tok_list[edge[0]])
                     elif edge[0] < min(sub_pos, obj_pos):
                         left_nbd_phrase.add(tok_list[edge[0]])
@@ -150,7 +156,8 @@ class Base(object):
 
             for cphr in np.argmin(dist, 1):
                 for i in range(dist.shape[0]):
-                    if dist[i, cphr] < 0.65: rels |= self.alias2rel[cphr]
+                    if dist[i, cphr] < 0.65:
+                        rels |= self.alias2rel[cphr]
 
             probY = [self.rel2id[r] for r in rels if r in self.rel2id]
             batch['ProbY'].append(probY)
@@ -177,7 +184,7 @@ class Base(object):
 
         # Reading Relation Alias side information
         rel2alias = json.loads(open(self.p.rel2alias_file).read())
-        self.alias2rel = ddict(set)
+        self.alias2rel = defaultdict(set)
         alias2id = {}
         for rel, aliases in rel2alias.items():
             for alias in aliases:
@@ -209,9 +216,10 @@ class Base(object):
     def add_loss(self, nn_out):
         with tf.name_scope('Loss_op'):
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_out, labels=self.input_y))
-            if self.regularizer != None: loss += tf.contrib.layers.apply_regularization(self.regularizer,
-                                                                                        tf.get_collection(
-                                                                                            tf.GraphKeys.REGULARIZATION_LOSSES))
+            if self.regularizer != None:
+                loss += tf.contrib.layers.apply_regularization(self.regularizer,
+                                                               tf.get_collection(
+                                                                   tf.GraphKeys.REGULARIZATION_LOSSES))
         return loss
 
     def add_optimizer(self, loss, isAdam=True):
@@ -227,7 +235,7 @@ class Base(object):
         self.p = params
         self.logger = get_logger(self.p.name, self.p.log_dir, self.p.config_dir)
 
-        self.logger.info(vars(self.p));
+        self.logger.info(vars(self.p))
         pprint(vars(self.p))
         self.p.batch_size = self.p.batch_size
 

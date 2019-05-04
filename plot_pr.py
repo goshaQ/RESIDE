@@ -1,10 +1,11 @@
-import numpy as np, argparse, pickle
-import matplotlib;
+import argparse
+import matplotlib
+import numpy as np
+import pickle
 
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_recall_curve, average_precision_score
-import pdb
 
 
 def loadData(path):

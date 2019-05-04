@@ -1,12 +1,18 @@
-import sys, os, pdb
+import argparse
+import json
+import os
+import random
+import sys
+
+import numpy as np
+import tensorflow as tf
+from flask import Flask, render_template
+from flask_cors import CORS
+
+from .online_reside import RESIDE
 
 sys.path.insert(0, './')
-
-import tensorflow as tf
-from flask import Flask, render_template, request
-from helper import *
-from online_reside import RESIDE
-from flask_cors import CORS, cross_origin
+from helper import set_gpu
 
 app = Flask(__name__, static_folder='static-entice')
 cors = CORS(app, resources={r"/api/*": {"origins": "*"}})

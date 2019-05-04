@@ -4,26 +4,22 @@ import pdb
 import pickle
 import re
 import sys
-
-from scipy.spatial.distance import cdist
-from orderedset import OrderedSet
-
 from collections import defaultdict
-from bert import run_classifier_with_tfhub
-import tensorflow_hub as hub
+
+import gensim
 import numpy as np
+from orderedset import OrderedSet
+from scipy.spatial.distance import cdist
 
 sys.path.append('./')
 
-from helper import getPhr2vec, mergeList, partition, createModel, createTokenizer, prepareInput, getPhr2BERT
-
+from helper import getPhr2vec, mergeList, partition
 
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
 parser.add_argument('--test', dest="FULL", action='store_false')
 parser.add_argument('--pos', dest="MAX_POS", default=60, type=int,
                     help='Max position to consider for positional embeddings')
-parser.add_argument('--mvoc', dest="MAX_VOCAB", default=150000, type=int,
-                    help='Maximum vocabulary to consider')
+parser.add_argument('--mvoc', dest="MAX_VOCAB", default=150000, type=int, help='Maximum vocabulary to consider')
 parser.add_argument('--maxw', dest="MAX_WORDS", default=100, type=int)
 parser.add_argument('--minw', dest="MIN_WORDS", default=5, type=int)
 parser.add_argument('--num', dest="num_procs", default=40, type=int)
@@ -36,15 +32,9 @@ parser.add_argument('--log_steps', default=10000, type=int, help='Logging freque
 # Change the below two arguments together
 parser.add_argument('--embed', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt')
 parser.add_argument('--embed_dim', default=50, type=int)
-parser.add_argument('--max_seq_length', default=128, type=int,
-                    help='The length of sequence tokens')
-parser.add_argument('--pretrained-bert-model',
-                    default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
-                    help='Path to the pretrained BERT model on TF Hub')
 
 # Below arguments can be used for testing processing script (process a part of data instead of full)
-parser.add_argument('--sample', dest='FULL', action='store_false',
-                    help='To process the entire data or a sample of it')
+parser.add_argument('--sample', dest='FULL', action='store_false', help='To process the entire data or a sample of it')
 parser.add_argument('--samp_size', dest='sample_size', default=200, type=int,
                     help='Sample size to use for testing processing script')
 args = parser.parse_args()
@@ -62,8 +52,7 @@ id2rel = dict([(v, k) for k, v in rel2id.items()])
 alias2rel = defaultdict(set)
 alias2id = {}
 
-embed_model = createModel(args.pretrained_bert_model)
-tokenizer = createTokenizer(args.pretrained_bert_model)
+embed_model = gensim.models.KeyedVectors.load_word2vec_format(args.embed_loc, binary=False)
 
 for rel, aliases in rel2alias.items():
     for alias in aliases:
@@ -74,14 +63,10 @@ for rel, aliases in rel2alias.items():
             alias2rel[alias2id[alias]].add(rel)
 
 temp = sorted(alias2id.items(), key=lambda x: x[1])
+temp.sort(key=lambda x: x[1])
 alias_list, _ = zip(*temp)
-alias_list = [prepareInput(tokenizer, alias, args.max_seq_length) for alias in alias_list]
-alias_embed = getPhr2BERT(embed_model, alias_list, args.embed_dim)
+alias_embed = getPhr2vec(embed_model, alias_list, args.embed_dim)
 id2alias = dict([(v, k) for k, v in alias2id.items()])
-
-from pprint import pprint
-
-pprint('ALIAS', alias_embed)
 
 data = {
     'train': [],
@@ -148,7 +133,8 @@ def read_file(file_path):
                 sub_off = [(start_off, start_off + len(bag['sub']), 'sub') for start_off in sub_start_off]
                 obj_off = [(start_off, start_off + len(bag['obj']), 'obj') for start_off in obj_start_off]
 
-                if sub_off == [] or obj_off == [] or 'corenlp' not in sent: continue
+                if sub_off == [] or obj_off == [] or 'corenlp' not in sent:
+                    continue
                 spans = [sub_off[0]] + [obj_off[0]]
                 off_begin, off_end, _ = zip(*spans)
 
@@ -186,7 +172,7 @@ def read_file(file_path):
 
                 if sub_pos is None or obj_pos is None:
                     print('Skipped entry!!')
-                    print('{} | {} | {}'.format(bag['sub'], bag['obj'], sent['sent']))
+                    print('{} | {} | {}'.format(bag['sub'], bag['obj'], sent['rsent']))
                     pdb.set_trace()
                     continue
 
@@ -305,22 +291,21 @@ print('Bags deleted {}'.format(del_cnt))
 """*************************** GET PROBABLE RELATIONS **************************"""
 
 
-def get_alias2rel(phr_list):
+def get_alias2rel(phr_list, args):
     phr_embed = getPhr2vec(embed_model, phr_list, args.embed_dim)
     dist = cdist(phr_embed, alias_embed, metric=args.metric)
     rels = set()
     for i, cphr in enumerate(np.argmin(dist, 1)):
-        if dist[i, cphr] < args.thresh:
-            rels |= alias2rel[cphr]
+        if dist[i, cphr] < args.thresh: rels |= alias2rel[cphr]
     return [rel2id[r] for r in rels if r in rel2id]
 
 
-def get_prob_rels(data):
+def get_prob_rels(data, args):
     res_list = []
     for content in data:
         prob_rels = []
         for phr_list in content['phr_lists']:
-            prob_rels.append(get_alias2rel(phr_list))
+            prob_rels.append(get_alias2rel(phr_list, args))
 
         content['prob_rels'] = prob_rels
         res_list.append(content)
@@ -373,7 +358,6 @@ vocab.append('UNK')
 """*************************** WORD 2 ID MAPPING **************************"""
 
 
-# TODO (goshaQ): Replace with tokenizer
 def getIdMap(vals, begin_idx=0):
     ele2id = {}
     for id, ele in enumerate(vals):
@@ -446,5 +430,5 @@ final_data = {
     'max_pos': (args.MAX_POS + 1) * 2 + 1
 }
 
-print(f'Saving pickle file as "data/{args.data}_processed_bert.pkl"')
-pickle.dump(final_data, open('data/{}_processed_bert.pkl'.format(args.data), 'wb'))
+print(f'Saving pickle file as "data/{args.data}_processed.pkl"')
+pickle.dump(final_data, open('data/{}_processed.pkl'.format(args.data), 'wb'))

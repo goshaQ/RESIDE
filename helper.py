@@ -1,15 +1,16 @@
-import numpy as np, os, sys, random, argparse
-import pickle, uuid, time, pdb, json, gensim, itertools
-import logging, logging.config, pathlib, re
-
-from collections import defaultdict as ddict
-from nltk.tokenize import word_tokenize
-from pprint import pprint
-from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
+import itertools
+import json
+import logging
+import logging.config
+import os
+import pathlib
+import sys
 
 import bert
+import numpy as np
 import tensorflow as tf
 import tensorflow_hub as hub
+from nltk.tokenize import word_tokenize
 
 # Set precision for numpy
 np.set_printoptions(precision=4)
@@ -36,6 +37,29 @@ def getEmbeddings(model, input_list):
                       as_dict=True,
                       signature='tokens')
         embed_list.append(embed)
+
+    return np.array(embed_list, dtype=np.float32)
+
+
+def getGloveEmbeddings(model, wrd_list, embed_dims):
+    """
+    Gives embedding for each word in wrd_list
+    Parameters
+    ----------
+    model:		Word2vec model
+    wrd_list:	List of words for which embedding is required
+    embed_dims:	Dimension of the embedding
+    Returns
+    -------
+    embed_matrix:	(len(wrd_list) x embed_dims) matrix containing embedding for each word in wrd_list in the same order
+    """
+    embed_list = []
+
+    for wrd in wrd_list:
+        if wrd in model.vocab:
+            embed_list.append(model.word_vec(wrd))
+        else:
+            embed_list.append(np.random.randn(embed_dims))  # Generates a random vector for words not in vocab
 
     return np.array(embed_list, dtype=np.float32)
 

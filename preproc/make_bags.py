@@ -11,92 +11,116 @@ def main(args):
     rel2id = json.loads(open('./preproc/{}_relation2id.json'.format(args.data)).read())
 
     print('Constructing training bags...')
-    train_data = defaultdict(lambda: {'rels': defaultdict(list)})
+    print('Counting number of training bags...')
+    data_counts = defaultdict(int)
     with open('./data/{}_train.json'.format(args.data)) as f:
         for i, line in enumerate(f):
             data = json.loads(line.strip())
 
-            _id = '{}_{}'.format(data['sub'], data['obj'])
+            _id = f'{data["sub"]}_{data["obj"]}'
+            data_counts[_id] += 1
+
+            if (i + 1) % args.log_steps == 0:
+                print('Processed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+
+    print('Combining and saving training bags...')
+    train_data = defaultdict(lambda: {'rels': defaultdict(list)})
+    data_counts_proc = defaultdict(int)
+    with open('./data/{}_train.json'.format(args.data)) as f,\
+            open('./data/{}_train_bags.json'.format(args.data), 'w') as fout:
+        for i, line in enumerate(f):
+            data = json.loads(line.strip())
+
+            _id = f'{data["sub"]}_{data["obj"]}'
+            data_counts_proc[_id] += 1
+
             train_data[_id]['sub_id'] = data['sub_id']
             train_data[_id]['obj_id'] = data['obj_id']
             train_data[_id]['sub'] = data['sub']
             train_data[_id]['obj'] = data['obj']
 
             train_data[_id]['rels'][rel2id.get(data['rel'], rel2id['NA'])].append({
-                'sent': data['sent'],
                 'corenlp': data['corenlp'],
                 'rsent': data['rsent'],
                 'openie': data['openie'],
             })
 
+            if data_counts_proc[_id] == data_counts[_id]:
+                data = train_data[_id]
+                for rel, sents in data['rels'].items():
+                    entry = {
+                        'sub': data['sub'],
+                        'obj': data['obj'],
+                        'sub_id': data['sub_id'],
+                        'obj_id': data['obj_id'],
+                        'sents': sents,
+                        'rel': [rel],
+                    }
+                    fout.write(json.dumps(entry) + '\n')
+                del train_data[_id]
+
             if (i + 1) % args.log_steps == 0:
                 print('Completed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
-
-    count = 0
-    with open('./data/{}_train_bags.json'.format(args.data), 'w') as f:
-        for _id, data in train_data.items():
-            for rel, sents in data['rels'].items():
-                entry = {
-                    'sub': data['sub'],
-                    'obj': data['obj'],
-                    'sub_id': data['sub_id'],
-                    'obj_id': data['obj_id'],
-                    'sents': sents,
-                    'rel': [rel],
-                }
-                f.write(json.dumps(entry) + '\n')
-
-                count += 1
-                if count % args.log_steps == 0:
-                    print('Writing Completed {}, {}'.format(count, time.strftime("%d_%m_%Y %H:%M:%S")))
-    del train_data
+    del train_data, data_counts, data_counts_proc
 
     print('Constructing test bags...')
-    test_data = defaultdict(lambda: {'sents': [], 'rels': set()})
+    print('Counting number of test bags...')
+    data_counts = defaultdict(int)
     with open('./data/{}_test.json'.format(args.data)) as f:
         for i, line in enumerate(f):
             data = json.loads(line.strip())
 
-            _id = '{}_{}'.format(data['sub'], data['obj'])
+            _id = f'{data["sub"]}_{data["obj"]}'
+            data_counts[_id] += 1
+
+            if (i + 1) % args.log_steps == 0:
+                print('Processed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+
+    print('Combining and saving test bags...')
+    test_data = defaultdict(lambda: {'rels': defaultdict(list)})
+    data_counts_proc = defaultdict(int)
+    with open('./data/{}_test.json'.format(args.data)) as f, \
+            open('./data/{}_test_bags.json'.format(args.data), 'w') as fout:
+        for i, line in enumerate(f):
+            data = json.loads(line.strip())
+
+            _id = f'{data["sub"]}_{data["obj"]}'
+            data_counts_proc[_id] += 1
+
             test_data[_id]['sub_id'] = data['sub_id']
             test_data[_id]['obj_id'] = data['obj_id']
             test_data[_id]['sub'] = data['sub']
             test_data[_id]['obj'] = data['obj']
-            test_data[_id]['rels'].add(rel2id.get(data['rel'], rel2id['NA']))
 
-            test_data[_id]['sents'].append({
-                'sent': data['sent'],
+            test_data[_id]['rels'][rel2id.get(data['rel'], rel2id['NA'])].append({
                 'corenlp': data['corenlp'],
                 'rsent': data['rsent'],
                 'openie': data['openie'],
             })
 
+            if data_counts_proc[_id] == data_counts[_id]:
+                data = test_data[_id]
+                for rel, sents in data['rels'].items():
+                    entry = {
+                        'sub': data['sub'],
+                        'obj': data['obj'],
+                        'sub_id': data['sub_id'],
+                        'obj_id': data['obj_id'],
+                        'sents': sents,
+                        'rel': [rel],
+                    }
+                    fout.write(json.dumps(entry) + '\n')
+                del test_data[_id]
+
             if (i + 1) % args.log_steps == 0:
                 print('Completed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
-
-    count = 0
-    with open('./data/{}_test_bags.json'.format(args.data), 'w') as f:
-        for _id, data in test_data.items():
-            entry = {
-                'sub': data['sub'],
-                'obj': data['obj'],
-                'sub_id': data['sub_id'],
-                'obj_id': data['obj_id'],
-                'sents': sents,
-                'rel': [rel],
-            }
-            f.write(json.dumps(entry) + '\n')
-
-            count += 1
-            if count % args.log_steps == 0:
-                print('Writing Completed {}, {}'.format(count, time.strftime("%d_%m_%Y %H:%M:%S")))
-    del test_data
+    del test_data, data_counts, data_counts_proc
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('-data', default='riedel')
-    parser.add_argument('-log_steps', default=10000, type=int,
+    parser.add_argument('--data', default='riedel')
+    parser.add_argument('--log_steps', default=20000, type=int,
                         help='Logging frequency in steps')
     args = parser.parse_args()
 

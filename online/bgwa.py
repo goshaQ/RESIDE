@@ -1,3 +1,13 @@
+import argparse
+import os
+import pickle
+import random
+import time
+import uuid
+
+from sklearn.metrics import average_precision_score
+
+from helper import set_gpu
 from .base_model import *
 
 
@@ -210,7 +220,7 @@ if __name__ == "__main__":
 
     args.embed_dim = int(args.embed_init.split('_')[1])
     if not args.restore and not args.onlyTest: args.name = args.name + '_' + time.strftime(
-        "%d_%m_%Y") + '_' + time.strftime("%H:%M:%S")
+        "%d_%m_%Y %H:%M:%S")
 
     tf.set_random_seed(args.seed)
     random.seed(args.seed)

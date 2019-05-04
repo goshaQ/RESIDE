@@ -1,8 +1,20 @@
+import argparse
+import os
+import pickle
+import random
+import uuid
+from collections import defaultdict
+from pprint import pprint
+
+import gensim
+import numpy as np
 import tensorflow as tf
 import tensorflow_hub as hub
+from sklearn.metrics import average_precision_score
 
-from helper import *
 from bert.modeling import BertModel
+
+from helper import getChunks, getGloveEmbeddings, get_logger, make_dir, set_gpu, getEmbeddings
 
 """
 Abbreviations used in variable names:
@@ -27,7 +39,8 @@ class RESIDE(object):
             -------
             Generator for creating batches.
             """
-        if shuffle: random.shuffle(data)
+        if shuffle:
+            random.shuffle(data)
 
         for chunk in getChunks(data, self.p.batch_size):  # chunk = batch
             batch = defaultdict(list)
@@ -75,16 +88,15 @@ class RESIDE(object):
 
                     for chunk in chunks:
                         res = {
+                            'X': [bag['X'][j] for j in chunk],
+                            'Pos1': [bag['Pos1'][j] for j in chunk],
+                            'Pos2': [bag['Pos2'][j] for j in chunk],
+                            'DepEdges': [bag['DepEdges'][j] for j in chunk],
+                            'ProbY': [bag['ProbY'][j] for j in chunk],
                             'Y': bag['Y'],
                             'SubType': bag['SubType'],
-                            'ObjType': bag['ObjType']
+                            'ObjType': bag['ObjType'],
                         }
-
-                        res['X'] = [bag['X'][j] for j in chunk]
-                        res['Pos1'] = [bag['Pos1'][j] for j in chunk]
-                        res['Pos2'] = [bag['Pos2'][j] for j in chunk]
-                        res['DepEdges'] = [bag['DepEdges'][j] for j in chunk]
-                        res['ProbY'] = [bag['ProbY'][j] for j in chunk]
 
                         data[dtype].append(res)
         return data
@@ -571,15 +583,26 @@ class RESIDE(object):
         in_wrds, in_pos1, in_pos2 = self.input_x, self.input_pos1, self.input_pos2
 
         with tf.variable_scope('Embeddings') as scope:
-            model = hub.Module(self.p.pretrained_bert_model, trainable=True)
-            ...
 
-            model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
-            embed_init = getEmbeddings(model, self.wrd_list, self.p.embed_dim)
-            _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
-                                              regularizer=self.regularizer)
-            wrd_pad = tf.zeros([1, self.p.embed_dim])
-            wrd_embeddings = tf.concat([wrd_pad, _wrd_embeddings], axis=0)
+            if self.p.embed_type == 'BERT':
+                model = hub.Module(self.p.pretrained_bert_model, trainable=True)
+                ...
+
+                embed_init = getEmbeddings(model, self.wrd_list)
+                _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
+                                                  regularizer=self.regularizer)
+                wrd_pad = tf.zeros([1, self.p.embed_dim])
+                wrd_embeddings = tf.concat([wrd_pad, _wrd_embeddings], axis=0)
+            elif self.p.embed_type == 'GloVe':
+                model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
+
+                embed_init = getGloveEmbeddings(model, self.wrd_list, self.p.embed_dim)
+                _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
+                                                  regularizer=self.regularizer)
+                wrd_pad = tf.zeros([1, self.p.embed_dim])
+                wrd_embeddings = tf.concat([wrd_pad, _wrd_embeddings], axis=0)
+            else:
+                raise ValueError('Incorrect embedding type: use `BERT` or `GloVe`')
 
             pos1_embeddings = tf.get_variable('pos1_embeddings', [self.max_pos, self.p.pos_dim],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
@@ -816,7 +839,7 @@ class RESIDE(object):
             y += np.argmax(self.getOneHot(batch['Y'], self.num_class), 1).tolist()
             bag_cnt += len(batch['sent_num'])
 
-            if step % 100 == 0:
+            if (step + 1) % self.p.log_steps == 0:
                 self.logger.info('{} ({}/{}):\t{:.5}\t{:.5}\t{}'.format(label, bag_cnt, len(self.data['test']),
                                                                         np.mean(accuracies) * 100, np.mean(losses),
                                                                         self.p.name))
@@ -854,7 +877,7 @@ class RESIDE(object):
 
             bag_cnt += len(batch['sent_num'])
 
-            if step % 10 == 0:
+            if (step + 1) % self.p.log_steps == 0:
                 self.logger.info('E:{} Train Accuracy ({}/{}):\t{:.5}\t{:.5}\t{}\t{:.5}'.format(epoch, bag_cnt,
                                                                                                 len(self.data['train']),
                                                                                                 np.mean(
@@ -947,9 +970,9 @@ class RESIDE(object):
         """
         self.summ_writer = tf.summary.FileWriter('tf_board/{}'.format(self.p.name), sess.graph)
         saver = tf.train.Saver()
-        save_dir = 'checkpoints/{}/'.format(self.p.name);
+        save_dir = 'checkpoints/{}/'.format(self.p.name)
         make_dir(save_dir)
-        res_dir = 'results/{}/'.format(self.p.name);
+        res_dir = 'results/{}/'.format(self.p.name)
         make_dir(res_dir)
         save_path = os.path.join(save_dir, 'best_model')
 
@@ -1064,6 +1087,8 @@ if __name__ == "__main__":
                         help='Only Evaluate the pretrained model (skip training)')
     parser.add_argument('--opt', dest="opt", default='adam',
                         help='Optimizer to use for training')
+    parser.add_argument('--log_steps', default=100, type=int,
+                        help='Logging frequency in steps')
 
     parser.add_argument('--eps', dest="eps", default=0.00000001, type=float,
                         help='Value of epsilon')
@@ -1083,9 +1108,14 @@ if __name__ == "__main__":
     parser.add_argument('--pretrained-bert-model',
                         default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
                         help='Path to the pretrained BERT model on TF Hub')
+
+    parser.add_argument('--embed_type',
+                        default='BERT',
+                        help='Embeddings type: BERT or GloVe')
     args = parser.parse_args()
 
-    if not args.restore: args.name = args.name
+    if not args.restore:
+        args.name = args.name
 
     # Set GPU to use
     set_gpu(args.gpu)
