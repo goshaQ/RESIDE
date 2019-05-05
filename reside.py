@@ -187,9 +187,12 @@ class RESIDE(object):
         self.num_deLabel = 1
 
         # Get Word List
-        self.wrd_list = list(self.voc2id.items())  # Get vocabulary
-        self.wrd_list.sort(key=lambda x: x[1])  # Sort vocabulary based on ids
-        self.wrd_list, _ = zip(*self.wrd_list)
+        if self.p.embed_type == 'ELMo':
+            pass
+        elif self.p.embed_type == 'GloVe':
+            self.wrd_list = list(self.voc2id.items())  # Get vocabulary
+            self.wrd_list.sort(key=lambda x: x[1])  # Sort vocabulary based on ids
+            self.wrd_list, _ = zip(*self.wrd_list)
 
         self.test_one, \
         self.test_two = self.getPdata(data)
@@ -204,8 +207,11 @@ class RESIDE(object):
         """
         Defines the placeholder required for the model
         """
-
-        self.input_x = tf.placeholder(tf.int32, shape=[None, None], name='input_data')  # Tokens ids of sentences
+        if self.p.embed_type == 'ELMo':
+            self.input_x = tf.placeholder(tf.string, shape=[None, None], name='input_data')  # Tokens ids of sentences
+            self.input_mask = tf.placeholder(tf.int32, shape=[None], name='input_mask')  # Mask of non-empty tokens
+        elif self.p.embed_type == 'GloVe':
+            self.input_x = tf.placeholder(tf.int32, shape=[None, None], name='input_data')  # Tokens ids of sentences
         self.input_y = tf.placeholder(tf.int32, shape=[None, None], name='input_labels')  # Actual relation of the bag
         self.input_pos1 = tf.placeholder(tf.int32, shape=[None, None], name='input_pos1')  # Position ids wrt entity 1
         self.input_pos2 = tf.placeholder(tf.int32, shape=[None, None], name='input_pos2')  # Position ids wrt entity 2
@@ -265,6 +271,30 @@ class RESIDE(object):
             pad_data[i, :len(ele)] = ele[:seq_len]
             mask[i, :len(ele)] = np.ones(len(ele[:seq_len]), np.float32)
 
+        return pad_data, mask
+    
+    def padStringData(self, data, seq_len):
+        """
+        Pads the data in a batch with strings | Used as a helper function by pad_dynamic
+
+        Parameters
+        ----------
+        data:		batch to be padded
+        seq_len:	maximum number of words in the batch
+
+        Returns
+        -------
+        Padded data and mask
+        """
+        pad_data = np.empty((len(data), seq_len), np.str)
+        mask = np.zeros(seq_len, np.int32)
+
+        print(pad_data)
+        for i, ele in enumerate([x.split() for x in data]):
+            pad_data[i, :len(ele)] = ele[:seq_len]
+            mask[i] = len(ele[:seq_len])
+
+        print('PAD_DATA', pad_data)
         return pad_data, mask
 
     def getOneHot(self, data, num_class, isprob=False):
@@ -337,7 +367,11 @@ class RESIDE(object):
             seq_len = max(seq_len, len(x))
             x_len[i] = len(x)
 
-        x_pad, _ = self.padData(X, seq_len)
+        if self.p.embed_type == 'ELMo':
+            x_pad = self.padStringData(X, seq_len)
+        elif self.p.embed_type == 'GloVe':
+            x_pad, _ = self.padData(X, seq_len)
+
         pos1_pad, _ = self.padData(pos1, seq_len)
         pos2_pad, _ = self.padData(pos2, seq_len)
         subtype, _ = self.padData(sub_type, max_type)
@@ -364,14 +398,17 @@ class RESIDE(object):
             'Pos2'], batch['sent_num'], batch['SubType'], batch['ObjType'], batch['ProbY']
         total_sents = len(batch['X'])
         total_bags = len(batch['Y'])
-        x_pad, x_len, pos1_pad, pos2_pad, seq_len, subtype, subtype_len, objtype, objtype_len, rel_alias_ind, rel_alias_len = self.pad_dynamic(
-            X, pos1, pos2, sub_type, obj_type, rel_alias)
-
+        x_pad, x_len, pos1_pad, pos2_pad, seq_len, subtype, subtype_len, objtype, objtype_len, rel_alias_ind, rel_alias_len =\
+            self.pad_dynamic(X, pos1, pos2, sub_type, obj_type, rel_alias)
         y_hot = self.getOneHot(Y, self.num_class)
         proby = self.getOneHot(rel_alias, self.num_class - 1, isprob=True)  # -1 because NA cannot be in proby
 
         feed_dict = {}
-        feed_dict[self.input_x] = np.array(x_pad)
+        if self.p.embed_type == 'ELMo':
+            feed_dict[self.input_x] = np.array(x_pad[0])
+            feed_dict[self.input_mask] = np.array(x_pad[1])
+        elif self.p.embed_type == 'GloVe':
+            feed_dict[self.input_x] = np.array(x_pad)
         feed_dict[self.input_pos1] = np.array(pos1_pad)
         feed_dict[self.input_pos2] = np.array(pos2_pad)
         feed_dict[self.input_subtype] = np.array(subtype)
@@ -590,18 +627,10 @@ class RESIDE(object):
         in_wrds, in_pos1, in_pos2 = self.input_x, self.input_pos1, self.input_pos2
 
         with tf.variable_scope('Embeddings') as scope:
-
-            if self.p.embed_type == 'BERT':
-                model = hub.Module(self.p.pretrained_bert_model, trainable=True)
-                embed_init = getBERTEmbeddings
-                ...
-
-                model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
-                embed_init = getGloveEmbeddings(model, self.wrd_list, self.p.embed_dim)
-                _wrd_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
-                                                  regularizer=self.regularizer)
-                wrd_pad = tf.zeros([1, self.p.embed_dim])
-                wrd_embeddings = tf.concat([wrd_pad, _wrd_embeddings], axis=0)
+            
+            # Check `embed_type` at the begining
+            if self.p.embed_type == 'ELMo':
+                model = hub.Module(self.p.pretrained_elmo_model, trainable=True)
             elif self.p.embed_type == 'GloVe':
                 model = gensim.models.KeyedVectors.load_word2vec_format(self.p.embed_loc, binary=False)
 
@@ -630,8 +659,18 @@ class RESIDE(object):
             alias_embed = tf.nn.embedding_lookup(alias_embeddings, self.input_proby_ind)
             alias_av = tf.divide(tf.reduce_sum(alias_embed, axis=1), tf.expand_dims(self.input_proby_len, axis=1))
 
-        wrd_embed = tf.nn.embedding_lookup(wrd_embeddings, in_wrds)
-        print('SHAPE', wrd_embeddings.shape)
+        if self.p.embed_type == 'ELMo':
+            in_mask = self.input_mask
+            wrd_embed = model(
+                inputs={
+                    'tokens': in_wrds,
+                    'sequence_len': in_mask,
+                },
+                signature='tokens',
+                as_dict=True
+            )['elmo']
+        elif self.p.embed_type == 'GloVe':
+            wrd_embed = tf.nn.embedding_lookup(wrd_embeddings, in_wrds)
         pos1_embed = tf.nn.embedding_lookup(pos1_embeddings, in_pos1)
         pos2_embed = tf.nn.embedding_lookup(pos2_embeddings, in_pos2)
         embeds = tf.concat([wrd_embed, pos1_embed, pos2_embed], axis=2)
@@ -879,6 +918,7 @@ class RESIDE(object):
 
         for step, batch in enumerate(self.getBatches(data, shuffle)):
             feed = self.create_feed_dict(batch)
+            print('DIMMM', feed[self.input_x])
             summary_str, loss, accuracy, _ = sess.run([self.merged_summ, self.loss, self.accuracy, self.train_op],
                                                       feed_dict=feed)
 
@@ -1115,13 +1155,12 @@ if __name__ == "__main__":
     parser.add_argument('--embed_dim', dest="embed_dim", default=50, type=int,
                         help='Dimension of embedding')
 
-    parser.add_argument('--pretrained-bert-model',
-                        default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
-                        help='Path to the pretrained BERT model on TF Hub')
+    parser.add_argument('--pretrained-elmo-model',
+                        default='https://tfhub.dev/google/elmo/2',
+                        help='Path to the pretrained ELMo model on TF Hub')
 
-    parser.add_argument('--embed_type',
-                        default='BERT',
-                        help='Embeddings type: BERT or GloVe')
+    parser.add_argument('--embed_type', default='ELMo',
+                        help='Embeddings type: ELMo or GloVe')
     args = parser.parse_args()
 
     if not args.restore:
