@@ -187,13 +187,13 @@ def getPhr2vec(model, phr_list, embed_dims):
     return np.array(embed_list)
 
 
-def buildPhr2ELMOGraph(model):
+def buildPhr2ELMoGraph(model):
     """
-    Builds placeholders and graph for ELMO embeddings computation
+    Builds placeholders and graph for ELMo embeddings computation
 
     Parameters
     ----------
-    model:		    ELMO model
+    model:		    ELMo model
 
     Returns
     -------
@@ -210,14 +210,14 @@ def buildPhr2ELMOGraph(model):
     return elmo_inputs, elmo_outputs
 
 
-def getPhr2ELMO(elmo_inputs, elmo_outputs, phr_list, sess=None):
+def getPhr2ELMo(elmo_inputs, elmo_outputs, phr_list, sess=None):
     """
     Gives embedding for each phrase in phr_list
 
     Parameters
     ----------
-    elmo_inputs:	ELMO inputs placeholders
-    elmo_outputs:	ELMO outputs op
+    elmo_inputs:	ELMo inputs placeholders
+    elmo_outputs:	ELMo outputs op
     phr_list:	    List of phrases for which embeddings are required
     sess:           tf.Session object
 

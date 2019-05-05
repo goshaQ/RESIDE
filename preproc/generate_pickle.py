@@ -19,7 +19,7 @@ from scipy.spatial.distance import cdist
 sys.path.append('./')
 
 from helper import mergeList, createModel, createTokenizer, prepareInputBERT, \
-    buildPhr2ELMOGraph, getPhr2ELMO, buildPhr2BERTGraph, getPhr2BERT
+    buildPhr2ELMoGraph, getPhr2ELMo, buildPhr2BERTGraph, getPhr2BERT
 
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
 parser.add_argument('--test', dest="FULL", action='store_false')
@@ -40,11 +40,11 @@ parser.add_argument('--seed', dest="seed", default=1234, type=int, help='Seed fo
 # Change the below two arguments together
 parser.add_argument('--max_seq_length', default=48, type=int,
                     help='The length of sequence tokens')
-parser.add_argument('--embed-type', default='ELMO',
-                    help='Embeddings type (ELMO or BERT)')
+parser.add_argument('--embed-type', default='ELMo',
+                    help='Embeddings type (ELMo or BERT)')
 parser.add_argument('--pretrained-elmo-model',
                     default='https://tfhub.dev/google/elmo/2',
-                    help='Path to the pretrained ELMO model on TF Hub')
+                    help='Path to the pretrained ELMo model on TF Hub')
 parser.add_argument('--pretrained-bert-model',
                     default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
                     help='Path to the pretrained BERT model on TF Hub')
@@ -52,7 +52,7 @@ parser.add_argument('--pretrained-bert-model',
 # Below arguments can be used for testing processing script (process a part of data instead of full)
 parser.add_argument('--sample', dest='FULL', action='store_false',
                     help='To process the entire data or a sample of it')
-parser.add_argument('--sample_size', dest='sample_size', default=200, type=int,
+parser.add_argument('--sample-size', dest='sample_size', default=200, type=int,
                     help='Sample size to use for testing processing script')
 args = parser.parse_args()
 
@@ -65,18 +65,17 @@ with open(f'./side_info/relation_alias/{args.data}/relation_alias_from_wikidata_
 with open(f'./preproc/{args.data}_relation2id.json') as f:
     rel2id = json.load(f)
 
-# id2rel = dict([(v, k) for k, v in rel2id.items()])
 alias2rel = defaultdict(set)
 alias2id = {}
 
-if args.embed_type == 'ELMO':
+if args.embed_type == 'ELMo':
     embed_model = createModel(args.pretrained_elmo_model)
     tokenizer = None
 elif args.embed_type == 'BERT':
     embed_model = createModel(args.pretrained_bert_model)
     tokenizer = createTokenizer(args.pretrained_bert_model)
 else:
-    raise ValueError('Incorrect embeddings type, try either BERT or ELMO')
+    raise ValueError('Incorrect embeddings type, try either BERT or ELMo')
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -92,14 +91,12 @@ for rel, aliases in rel2alias.items():
             alias2id[alias] = len(alias2id)
             alias2rel[alias2id[alias]].add(rel)
 
-# id2alias = dict([(v, k) for k, v in alias2id.items()])
-
 temp = sorted(alias2id.items(), key=lambda x: x[1])
 alias_list, _ = zip(*temp)
 
-if args.embed_type == 'ELMO':
-    elmo_inputs, elmo_outputs = buildPhr2ELMOGraph(embed_model)
-    alias_embed = getPhr2ELMO(elmo_inputs, elmo_outputs, alias_list, sess)
+if args.embed_type == 'ELMo':
+    elmo_inputs, elmo_outputs = buildPhr2ELMoGraph(embed_model)
+    alias_embed = getPhr2ELMo(elmo_inputs, elmo_outputs, alias_list, sess)
 elif args.embed_type == 'BERT':
     alias_list = prepareInputBERT(tokenizer, alias_list, args.max_seq_length)
 
@@ -120,6 +117,7 @@ def read_file(file_path):
         for k, line in enumerate(f):
             bag = json.loads(line.strip())
 
+            bag_sents = []
             wrds_list = []
             pos1_list = []
             pos2_list = []
@@ -268,10 +266,8 @@ def read_file(file_path):
                 phrases.add(middle_phr)
                 phrases.add(mid_phrase)
 
-                if args.embed_type == 'ELMO':
-                    wrds_list.append(sent['rsent'])
-                else:
-                    wrds_list.append(wrds)
+                bag_sents.append(sent['rsent'])
+                wrds_list.append(wrds)
                 pos1_list.append(pos1)
                 pos2_list.append(pos2)
                 sub_pos_list.append(sub_pos)
@@ -286,6 +282,7 @@ def read_file(file_path):
                 'phrase_list': phrase_list,
                 'sub_pos_list': sub_pos_list,
                 'obj_pos_list': obj_pos_list,
+                'sents': bag_sents,
                 'wrds_list': wrds_list,
                 'pos1_list': pos1_list,
                 'pos2_list': pos2_list,
@@ -330,7 +327,7 @@ def remove_outliers(dataset):
             del_cnt += 1
             continue
     
-    print('Bags deleted {}'.format(del_cnt))
+    print(f'Bags deleted {del_cnt}')
 
 
 remove_outliers(data['train'])
@@ -340,9 +337,7 @@ remove_outliers(data['test'])
 """*************************** GET PROBABLE RELATIONS **************************"""
 
 
-def get_alias2rel(phr_embed, args):
-    dist = cdist(phr_embed, alias_embed, metric=args.metric)
-
+def get_alias2rel(dist, args):
     rels = set()
     for i, cphr in enumerate(np.argmin(dist, 1)):
         if dist[i, cphr] < args.thresh:
@@ -350,30 +345,38 @@ def get_alias2rel(phr_embed, args):
     return [rel2id[r] for r in rels if r in rel2id]
 
 
-def get_alias2rel_batch(phr_list, args, batch_split_indices, bag_split_indices):
-    if args.embed_type == 'ELMO':
-        phr_embed = getPhr2ELMO(elmo_inputs, elmo_outputs, phr_list, sess)
-    else:
-        phr_embed = getPhr2BERT(bert_inputs, bert_outputs, phr_list, sess)
-    # print(phr_embed.shape)
+def get_alias2rel_batch(phr_list, args, batch_split_indices, bag_split_indices, batch_size=512):
+    phr_embeds = []
+
+    for i in range(0, len(phr_list), batch_size):
+        phr_list_i = phr_list[i:i+batch_size]
+
+        if args.embed_type == 'ELMo':
+            phr_embed = getPhr2ELMo(elmo_inputs, elmo_outputs, phr_list_i, sess)
+        else:
+            phr_embed = getPhr2BERT(bert_inputs, bert_outputs, phr_list_i, sess)
+
+        phr_embeds.append(phr_embed)
+
+    phr_embed = np.concatenate(phr_embeds, axis=0)
 
     # embeds for multiple bags, should be split
-    phr_embed = np.split(phr_embed, batch_split_indices)[:-1]
-    # print((len(phr_embed), list(map(lambda x: x.shape, phr_embed)))
+    dist = cdist(phr_embed, alias_embed, metric=args.metric)
+    dist = np.split(dist, batch_split_indices, axis=0)[:-1]
 
     res_list = []
-    for i in range(len(phr_embed)):
+    for i in range(len(dist)):
         prob_rels = []
-        phr_embed_i = np.split(phr_embed[i], bag_split_indices[i], axis=0)[:-1]
-        for phr_embed_ij in phr_embed_i:
-            prob_rels.append(get_alias2rel(phr_embed_ij, args))
+        dist_i = np.split(dist[i], bag_split_indices[i], axis=0)[:-1]
+        for dist_ij in dist_i:
+            prob_rels.append(get_alias2rel(dist_ij, args))
 
         res_list.append(prob_rels)
 
     return res_list
 
 
-def get_prob_rels(data, args, batch_size=1280):
+def get_prob_rels(data, args, batch_size=512):
     res_list = []
 
     n_phrases = 0
@@ -455,10 +458,7 @@ def getIdMap(vals, begin_idx=0):
     return ele2id
 
 
-if args.embed_type == 'ELMO':
-    vocab = {}
-else:
-    vocab = tokenizer.vocab
+vocab = {} if args.embed_type == 'ELMo' else tokenizer.vocab
 voc2id = vocab
 id2voc = dict([(v, k) for k, v in voc2id.items()])
 
@@ -487,13 +487,13 @@ def posMap(pos):
         return pos + (args.MAX_POS + 1)
 
 
-def procData(data, split='train'):
+def procData(dataset):
     res_list = []
 
-    for bag in data:
+    for bag in dataset:
         # Labels will be K - hot
         res = {
-            'X': bag['wrds_list'] if args.embed_type == 'ELMO'
+            'X': bag['sents'] if args.embed_type == 'ELMo'
             else [[getId(wrd, voc2id, '[UNK]') for wrd in wrds] for wrds in bag['wrds_list']],
             'Pos1': [[posMap(pos) for pos in pos1] for pos1 in bag['pos1_list']],
             'Pos2': [[posMap(pos) for pos in pos2] for pos2 in bag['pos2_list']],
@@ -516,8 +516,8 @@ def procData(data, split='train'):
 
 
 final_data = {
-    'train': procData(data['train'], 'train'),
-    'test': procData(data['test'], 'test'),
+    'train': procData(data['train']),
+    'test': procData(data['test']),
     'voc2id': voc2id,
     'id2voc': id2voc,
     'type2id': type2id,
@@ -525,6 +525,6 @@ final_data = {
     'max_pos': (args.MAX_POS + 1) * 2 + 1
 }
 
-embed_type = 'elmo' if args.embed_type == 'ELMO' else 'bert'
-print(f'Saving pickle file as "data/{args.data}_processed_{embed_type}.pkl"')
-pickle.dump(final_data, open(f'data/{args.data}_processed_{embed_type}.pkl', 'wb'))
+save_path = f'data/{args.data}_processed_{args.embed_type.lower()}.pkl'
+print(f'Saving pickle file as "{save_path}"')
+pickle.dump(final_data, open(save_path, 'wb'))
