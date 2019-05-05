@@ -162,7 +162,7 @@ def getPhr2vec(model, phr_list, embed_dims):
     Parameters
     ----------
     model:		Word2vec model
-    wrd_list:	List of words for which embedding is required
+    phr_list:	List of phrases
     embed_dims:	Dimension of the embedding
 
     Returns
@@ -187,7 +187,7 @@ def getPhr2vec(model, phr_list, embed_dims):
     return np.array(embed_list)
 
 
-def getPhr2BERT(model, phr_list, embed_dims):
+def getPhr2BERT(model, phr_list, sess=None):
     """
     Gives embedding for each phrase in phr_list
 
@@ -200,22 +200,26 @@ def getPhr2BERT(model, phr_list, embed_dims):
     -------
     embed_matrix:	(len(phr_list) x embed_dims) matrix containing embedding for each phrase in the phr_list in the same order
     """
-    embed_list = []
 
-    for phr in phr_list:
-        print('PHR')
-        vec = np.zeros(embed_dims, np.float32)
-        sequence_output, pooled_output = model(
-            inputs=phr,
-            as_dict=True,
-            signature='tokens')
+    if sess is None:
+        sess_is_none = True
+        sess = tf.Session()
+        sess.run(tf.global_variables_initializer())
+    else:
+        sess_is_none = False
 
-        with tf.Session().as_default() as sess:
-            result = sess.run([sequence_output, pooled_output])
-        print(result)
-        break
+    bert_outputs = model(
+        inputs=phr_list,
+        as_dict=True,
+        signature='tokens')
 
-        embed_list.append(model)
+    result = sess.run(bert_outputs['sequence_output'])
+
+    if sess_is_none:
+        sess.close()
+
+    return np.array(result)[:, 0, :]  # .mean(axis=1)
+
 
 def set_gpu(gpus):
     """
@@ -338,7 +342,7 @@ def partition(inp_list, n):
     Parameters
     ----------
     inp_list:       List to be splittted
-    n:     		Number of equal partitions needed
+    n:     		    Number of equal partitions needed
 
     Returns
     -------

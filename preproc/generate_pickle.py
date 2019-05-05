@@ -2,20 +2,23 @@ import argparse
 import json
 import pdb
 import pickle
+import random
 import re
 import sys
-
-from scipy.spatial.distance import cdist
-from orderedset import OrderedSet
-
+import time
 from collections import defaultdict
+
+import tensorflow as tf
 from bert import run_classifier_with_tfhub
 import tensorflow_hub as hub
+
 import numpy as np
+from orderedset import OrderedSet
+from scipy.spatial.distance import cdist
 
 sys.path.append('./')
 
-from helper import getPhr2vec, mergeList, partition, createModel, createTokenizer, prepareInput, getPhr2BERT
+from helper import mergeList, createModel, createTokenizer, prepareInput, getPhr2BERT
 
 
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
@@ -32,11 +35,12 @@ parser.add_argument('--nfinetype', dest='wFineType', action='store_false')
 parser.add_argument('--metric', default='cosine')
 parser.add_argument('--data', default='riedel')
 parser.add_argument('--log_steps', default=10000, type=int, help='Logging frequency in steps')
+parser.add_argument('--seed', dest="seed", default=1234, type=int, help='Seed for randomization')
 
 # Change the below two arguments together
 parser.add_argument('--embed', dest="embed_loc", default='./glove/glove.6B.50d_word2vec.txt')
 parser.add_argument('--embed_dim', default=50, type=int)
-parser.add_argument('--max_seq_length', default=128, type=int,
+parser.add_argument('--max_seq_length', default=64, type=int,
                     help='The length of sequence tokens')
 parser.add_argument('--pretrained-bert-model',
                     default='https://tfhub.dev/google/bert_uncased_L-12_H-768_A-12/1',
@@ -75,13 +79,10 @@ for rel, aliases in rel2alias.items():
 
 temp = sorted(alias2id.items(), key=lambda x: x[1])
 alias_list, _ = zip(*temp)
-alias_list = [prepareInput(tokenizer, alias, args.max_seq_length) for alias in alias_list]
-alias_embed = getPhr2BERT(embed_model, alias_list, args.embed_dim)
+alias_list = prepareInput(tokenizer, alias_list, args.max_seq_length)
+alias_embed = getPhr2BERT(embed_model, alias_list)
 id2alias = dict([(v, k) for k, v in alias2id.items()])
 
-from pprint import pprint
-
-pprint('ALIAS', alias_embed)
 
 data = {
     'train': [],
@@ -198,8 +199,8 @@ def read_file(file_path):
                 if sent['openie'] is not None:
                     for corenlp_sent in sent['openie']['sentences']:
                         for openie in corenlp_sent['openie']:
-                            if openie['subject'].lower() == bag['sub'].replace('_', ' ') and openie['object'].lower() == \
-                                    bag['obj'].replace('_', ' '):
+                            if openie['subject'].lower() == bag['sub'].replace('_', ' ') \
+                                    and openie['object'].lower() == bag['obj'].replace('_', ' '):
                                 phrases.add(openie['relation'])
 
                 if abs(sub_pos - obj_pos) < 5:
@@ -304,10 +305,16 @@ print('Bags deleted {}'.format(del_cnt))
 
 """*************************** GET PROBABLE RELATIONS **************************"""
 
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+tf.set_random_seed(args.seed)
+random.seed(args.seed)
+np.random.seed(args.seed)
 
-def get_alias2rel(phr_list):
-    phr_embed = getPhr2vec(embed_model, phr_list, args.embed_dim)
+
+def get_alias2rel(phr_embed, args):
     dist = cdist(phr_embed, alias_embed, metric=args.metric)
+
     rels = set()
     for i, cphr in enumerate(np.argmin(dist, 1)):
         if dist[i, cphr] < args.thresh:
@@ -315,19 +322,73 @@ def get_alias2rel(phr_list):
     return [rel2id[r] for r in rels if r in rel2id]
 
 
-def get_prob_rels(data):
-    res_list = []
-    for content in data:
-        prob_rels = []
-        for phr_list in content['phr_lists']:
-            prob_rels.append(get_alias2rel(phr_list))
+def get_alias2rel_batch(data, phr_list, args, batch_split_indices, bag_split_indices):
+    # print(phr_list)
+    phr_embed = getPhr2BERT(embed_model, phr_list, sess)  # embeds for multiple bags, should be splitted
+    # print(phr_embed.shape)
 
-        content['prob_rels'] = prob_rels
-        res_list.append(content)
+    phr_embed = np.split(phr_embed, batch_split_indices)[:-1]
+    # print(len(phr_embed))
+    # print(list(map(lambda x: x.shape, phr_embed)))
+
+    res_list = []
+    for i in range(len(phr_embed)):
+        prob_rels = []
+        phr_embed_i = np.split(phr_embed[i], bag_split_indices[i], axis=0)[:-1]
+        # print(len(phr_embed_i), list(map(lambda x: x.shape, phr_embed_i)))
+        for phr_embed_ij in phr_embed_i:
+            prob_rels.append(get_alias2rel(phr_embed_ij, args))
+
+        # print(prob_rels)
+        data[i]['prob_rels'] = prob_rels
+        res_list.append(data[i])
 
     return res_list
 
 
+def get_prob_rels(data, args, batch_size=128):
+    res_list = []
+
+    # print(len(data))
+    for i in range(0, len(data), batch_size):
+        data_batch = data[i:i+batch_size]
+        # print(len(data_batch))
+
+        phr_lists_batch = []
+        batch_split_indices = []
+        bag_split_indices = []
+
+        for content in data_batch:
+            phr_lists = content['phr_lists']
+            bag_split_indices.append(np.cumsum(list(map(lambda x: len(x), phr_lists))))
+
+            phr_lists = mergeList(phr_lists)
+            phr_lists_batch.append(phr_lists)
+
+            # n_phrases.append(len(phr_lists))
+            if batch_split_indices:
+                batch_split_indices.append(batch_split_indices[-1] + len(phr_lists))
+            else:
+                batch_split_indices.append(len(phr_lists))
+
+        phr_lists_batch = mergeList(phr_lists_batch)
+        # print(len(phr_lists_batch))
+        # print(phr_lists_batch)
+        phr_list_batch = prepareInput(tokenizer, phr_lists_batch, args.max_seq_length)
+        rel_list_batch = get_alias2rel_batch(data_batch, phr_list_batch, args, batch_split_indices, bag_split_indices)
+        # print(rel_list_batch)
+
+        res_list.append(rel_list_batch)
+
+        print('Completed {}, {}'.format(i + len(data_batch), time.strftime("%d_%m_%Y %H:%M:%S")))
+
+    res_list = mergeList(res_list)
+    # print(res_list)
+
+    return res_list
+
+
+print('Computing probable relations for training bags...')
 train_mega_phr_list = []
 for i, bag in enumerate(data['train']):
     train_mega_phr_list.append({
@@ -335,13 +396,14 @@ for i, bag in enumerate(data['train']):
         'phr_lists': bag['phrase_list']
     })
 
-chunks = partition(train_mega_phr_list, args.num_procs)
-results = mergeList((get_prob_rels(chunk, args) for chunk in chunks))
+results = get_prob_rels(train_mega_phr_list, args)
 for res in results:
     data['train'][res['bag_index']]['prob_rels'] = res['prob_rels']
     if len(data['train'][res['bag_index']]['prob_rels']) != len(data['train'][res['bag_index']]['phrase_list']):
         pdb.set_trace()
 
+
+print('Computing probable relations for test bags...')
 test_mega_phr_list = []
 for i, bag in enumerate(data['test']):
     test_mega_phr_list.append({
@@ -349,31 +411,17 @@ for i, bag in enumerate(data['test']):
         'phr_lists': bag['phrase_list']
     })
 
-chunks = partition(test_mega_phr_list, args.num_procs)
-results = mergeList((get_prob_rels(chunk, args) for chunk in chunks))
+results = get_prob_rels(test_mega_phr_list, args)
 for res in results:
     data['test'][res['bag_index']]['prob_rels'] = res['prob_rels']
     if len(data['test'][res['bag_index']]['prob_rels']) != len(data['test'][res['bag_index']]['phrase_list']):
         pdb.set_trace()
 
-"""*************************** FORM VOCABULARY **************************"""
-voc_freq = defaultdict(int)
-for bag in data['train']:
-    for wrds in bag['wrds_list']:
-        for wrd in wrds:
-            voc_freq[wrd] += 1
-
-freq = list(voc_freq.items())
-freq.sort(key=lambda x: x[1], reverse=True)
-freq = freq[:args.MAX_VOCAB]
-vocab, _ = map(list, zip(*freq))
-
-vocab.append('UNK')
+sess.close()
 
 """*************************** WORD 2 ID MAPPING **************************"""
 
 
-# TODO (goshaQ): Replace with tokenizer
 def getIdMap(vals, begin_idx=0):
     ele2id = {}
     for id, ele in enumerate(vals):
@@ -381,7 +429,8 @@ def getIdMap(vals, begin_idx=0):
     return ele2id
 
 
-voc2id = getIdMap(vocab, 1)
+vocab = dict(tokenizer.vocab)
+voc2id = vocab
 id2voc = dict([(v, k) for k, v in voc2id.items()])
 
 type_vocab = OrderedSet(['NONE'] + list(set(mergeList(ent2type.values()))))
@@ -415,7 +464,7 @@ def procData(data, split='train'):
     for bag in data:
         # Labels will be K - hot
         res = {
-            'X': [[getId(wrd, voc2id, 'UNK') for wrd in wrds] for wrds in bag['wrds_list']],
+            'X': [[getId(wrd, voc2id, '[UNK]') for wrd in wrds] for wrds in bag['wrds_list']],
             'Pos1': [[posMap(pos) for pos in pos1] for pos1 in bag['pos1_list']],
             'Pos2': [[posMap(pos) for pos in pos2] for pos2 in bag['pos2_list']],
             'Y': bag['rels'],

@@ -13,7 +13,7 @@ from scipy.spatial.distance import cdist
 
 sys.path.append('./')
 
-from helper import getPhr2vec, mergeList, partition
+from helper import getPhr2vec, mergeList
 
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
 parser.add_argument('--test', dest="FULL", action='store_false')
@@ -296,7 +296,8 @@ def get_alias2rel(phr_list, args):
     dist = cdist(phr_embed, alias_embed, metric=args.metric)
     rels = set()
     for i, cphr in enumerate(np.argmin(dist, 1)):
-        if dist[i, cphr] < args.thresh: rels |= alias2rel[cphr]
+        if dist[i, cphr] < args.thresh:
+            rels |= alias2rel[cphr]
     return [rel2id[r] for r in rels if r in rel2id]
 
 
@@ -320,8 +321,7 @@ for i, bag in enumerate(data['train']):
         'phr_lists': bag['phrase_list']
     })
 
-chunks = partition(train_mega_phr_list, args.num_procs)
-results = mergeList((get_prob_rels(chunk, args) for chunk in chunks))
+results = get_prob_rels(train_mega_phr_list, args)
 for res in results:
     data['train'][res['bag_index']]['prob_rels'] = res['prob_rels']
     if len(data['train'][res['bag_index']]['prob_rels']) != len(data['train'][res['bag_index']]['phrase_list']):
@@ -334,8 +334,7 @@ for i, bag in enumerate(data['test']):
         'phr_lists': bag['phrase_list']
     })
 
-chunks = partition(test_mega_phr_list, args.num_procs)
-results = mergeList((get_prob_rels(chunk, args) for chunk in chunks))
+results = get_prob_rels(test_mega_phr_list, args)
 for res in results:
     data['test'][res['bag_index']]['prob_rels'] = res['prob_rels']
     if len(data['test'][res['bag_index']]['prob_rels']) != len(data['test'][res['bag_index']]['phrase_list']):
