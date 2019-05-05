@@ -9,6 +9,5 @@ rm -rf /tmp/cookies.txt
 
 echo "Extracting files"
 unzip data/riedel_preprocessed.zip -d data
-mv data/data/* data
 rm data/riedel_preprocessed.zip
 rm -rf data/data
