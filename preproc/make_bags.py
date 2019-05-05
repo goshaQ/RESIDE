@@ -4,7 +4,11 @@ import sys
 import time
 from collections import defaultdict
 
+import nltk
+
 sys.path.append('./')
+
+nltk.download('punkt')
 
 
 def main(args):

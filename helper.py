@@ -32,9 +32,9 @@ def getBERTEmbeddings(model, wrd_list):
     """
     embed_list = []
 
-    embed = model(inputs=prepareInput(wrd_list),
-                    as_dict=True,
-                    signature='tokens')
+    embed = model(inputs=prepareInputBERT(wrd_list),
+                  as_dict=True,
+                  signature='tokens')
 
     return np.array(embed_list, dtype=np.float32)
 
@@ -62,7 +62,7 @@ def getGloveEmbeddings(model, wrd_list, embed_dims):
     return np.array(embed_list, dtype=np.float32)
 
 
-def prepareInput(tokenizer, sentences, max_seq_length):
+def prepareInputBERT(tokenizer, sentences, max_seq_length):
     """
     Converts a set of sentences to the format expected by BERT model
 
@@ -119,15 +119,15 @@ def prepareInput(tokenizer, sentences, max_seq_length):
 
 def createModel(bert_model_hub, trainable=False):
     """
-    Get BERT model from the Hub module
+    Get model from the Hub module
 
     Parameters
     ----------
-    bert_model_hub: Path to the pretrained BERT module.
+    bert_model_hub: Path to the pretrained module.
 
     Returns
     -------
-    model:  BERT model
+    model:  model object
     """
     return hub.Module(bert_model_hub, trainable=trainable)
 
@@ -187,14 +187,39 @@ def getPhr2vec(model, phr_list, embed_dims):
     return np.array(embed_list)
 
 
-def getPhr2BERT(model, phr_list, sess=None):
+def buildPhr2ELMOGraph(model):
+    """
+    Builds placeholders and graph for ELMO embeddings computation
+
+    Parameters
+    ----------
+    model:		    ELMO model
+
+    Returns
+    -------
+    embed_matrix:	(len(phr_list) x embed_dims) matrix containing embedding for each phrase in the phr_list in the same order
+    """
+
+    elmo_inputs = tf.placeholder(tf.string, shape=(None))
+
+    elmo_outputs = model(
+        elmo_inputs,
+        signature="default",
+        as_dict=True)['default']
+
+    return elmo_inputs, elmo_outputs
+
+
+def getPhr2ELMO(elmo_inputs, elmo_outputs, phr_list, sess=None):
     """
     Gives embedding for each phrase in phr_list
 
     Parameters
     ----------
-    model:		BERT model
-    phr_list:	List of words for which embedding is required
+    elmo_inputs:	ELMO inputs placeholders
+    elmo_outputs:	ELMO outputs op
+    phr_list:	    List of phrases for which embeddings are required
+    sess:           tf.Session object
 
     Returns
     -------
@@ -208,17 +233,85 @@ def getPhr2BERT(model, phr_list, sess=None):
     else:
         sess_is_none = False
 
-    bert_outputs = model(
-        inputs=phr_list,
-        as_dict=True,
-        signature='tokens')
+    feed_dict = {
+        elmo_inputs: phr_list,
+    }
 
-    result = sess.run(bert_outputs['sequence_output'])
-
+    result = sess.run(elmo_outputs,
+                      feed_dict=feed_dict)
     if sess_is_none:
         sess.close()
 
-    return np.array(result)[:, 0, :]  # .mean(axis=1)
+    return result
+
+
+def buildPhr2BERTGraph(model, max_seq_length):
+    """
+    Builds placeholders and graph for BERT embeddings computation
+
+    Parameters
+    ----------
+    model:		    BERT model
+    max_seq_length:	Maximum length of a sequence
+
+    Returns
+    -------
+    embed_matrix:	(len(phr_list) x embed_dims) matrix containing embedding for each phrase in the phr_list in the same order
+    """
+
+    input_ids = tf.placeholder(tf.int32, shape=(None, max_seq_length))
+    input_mask = tf.placeholder(tf.int32, shape=(None, max_seq_length))
+    segment_ids = tf.placeholder(tf.int32, shape=(None, max_seq_length))
+
+    bert_inputs = {
+        'input_ids': input_ids,
+        'input_mask': input_mask,
+        'segment_ids': segment_ids
+    }
+
+    bert_outputs = model(
+        inputs=bert_inputs,
+        as_dict=True,
+        signature='tokens')
+
+    return bert_inputs, bert_outputs
+
+
+def getPhr2BERT(bert_inputs, bert_outputs, phr_list, sess=None):
+    """
+    Gives embedding for each phrase in phr_list
+
+    Parameters
+    ----------
+    bert_inputs:	BERT inputs placeholders
+    bert_outputs:	BERT outputs op
+    phr_list:	    List of phrases for which embeddings are required
+    sess:           tf.Session object
+
+    Returns
+    -------
+    embed_matrix:	(len(phr_list) x embed_dims) matrix containing embedding for each phrase in the phr_list in the same order
+    """
+
+    if sess is None:
+        sess_is_none = True
+        sess = tf.Session()
+        sess.run(tf.global_variables_initializer())
+    else:
+        sess_is_none = False
+
+    feed_dict = {
+        bert_inputs['input_ids']: phr_list['input_ids'],
+        bert_inputs['input_mask']: phr_list['input_mask'],
+        bert_inputs['segment_ids']: phr_list['segment_ids'],
+    }
+
+    result = sess.run(bert_outputs['sequence_output'],
+                      feed_dict=feed_dict)
+    if sess_is_none:
+        sess.close()
+
+    return np.array(result)[:, 0, :]
 
 
 def set_gpu(gpus):

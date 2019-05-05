@@ -35,7 +35,7 @@ parser.add_argument('--embed_dim', default=50, type=int)
 
 # Below arguments can be used for testing processing script (process a part of data instead of full)
 parser.add_argument('--sample', dest='FULL', action='store_false', help='To process the entire data or a sample of it')
-parser.add_argument('--samp_size', dest='sample_size', default=200, type=int,
+parser.add_argument('--sample_size', dest='sample_size', default=200, type=int,
                     help='Sample size to use for testing processing script')
 args = parser.parse_args()
 
@@ -305,40 +305,30 @@ def get_prob_rels(data, args):
     res_list = []
     for content in data:
         prob_rels = []
-        for phr_list in content['phr_lists']:
+        for phr_list in content['phrase_list']:
             prob_rels.append(get_alias2rel(phr_list, args))
 
-        content['prob_rels'] = prob_rels
-        res_list.append(content)
+        res_list.append(prob_rels)
 
     return res_list
 
 
-train_mega_phr_list = []
-for i, bag in enumerate(data['train']):
-    train_mega_phr_list.append({
-        'bag_index': i,
-        'phr_lists': bag['phrase_list']
-    })
-
-results = get_prob_rels(train_mega_phr_list, args)
-for res in results:
-    data['train'][res['bag_index']]['prob_rels'] = res['prob_rels']
-    if len(data['train'][res['bag_index']]['prob_rels']) != len(data['train'][res['bag_index']]['phrase_list']):
+print('Computing probable relations for training bags...')
+results = get_prob_rels(data['train'], args)
+for i in range(len(results)):
+    data['train'][i]['prob_rels'] = results[i]
+    if len(data['train'][i]['prob_rels']) != len(data['train'][i]['phrase_list']):
         pdb.set_trace()
+del results
 
-test_mega_phr_list = []
-for i, bag in enumerate(data['test']):
-    test_mega_phr_list.append({
-        'bag_index': i,
-        'phr_lists': bag['phrase_list']
-    })
 
-results = get_prob_rels(test_mega_phr_list, args)
-for res in results:
-    data['test'][res['bag_index']]['prob_rels'] = res['prob_rels']
-    if len(data['test'][res['bag_index']]['prob_rels']) != len(data['test'][res['bag_index']]['phrase_list']):
+print('Computing probable relations for test bags...')
+results = get_prob_rels(data['test'], args)
+for i in range(len(results)):
+    data['test'][i]['prob_rels'] = results[i]
+    if len(data['test'][i]['prob_rels']) != len(data['test'][i]['phrase_list']):
         pdb.set_trace()
+del results
 
 """*************************** FORM VOCABULARY **************************"""
 voc_freq = defaultdict(int)
