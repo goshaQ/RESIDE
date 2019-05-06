@@ -26,6 +26,8 @@ def main(args):
 
             if (i + 1) % args.log_steps == 0:
                 print('Processed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+            if not args.FULL and i > args.sample_size:
+                break
 
     print('Combining and saving training bags...')
     train_data = defaultdict(lambda: {'rels': defaultdict(list)})
@@ -65,6 +67,8 @@ def main(args):
 
             if (i + 1) % args.log_steps == 0:
                 print('Completed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+            if not args.FULL and i > args.sample_size:
+                break
     del train_data, data_counts, data_counts_proc
 
     print('Constructing test bags...')
@@ -79,6 +83,8 @@ def main(args):
 
             if (i + 1) % args.log_steps == 0:
                 print('Processed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+            if not args.FULL and i > args.sample_size:
+                break
 
     print('Combining and saving test bags...')
     test_data = defaultdict(lambda: {'rels': defaultdict(list)})
@@ -118,14 +124,20 @@ def main(args):
 
             if (i + 1) % args.log_steps == 0:
                 print('Completed {}, {}'.format(i + 1, time.strftime("%d_%m_%Y %H:%M:%S")))
+            if not args.FULL and i > args.sample_size:
+                break
     del test_data, data_counts, data_counts_proc
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--data', default='riedel')
-    parser.add_argument('--log_steps', default=20000, type=int,
+    parser.add_argument('--log-steps', default=20000, type=int,
                         help='Logging frequency in steps')
+    parser.add_argument('--sample', dest='FULL', action='store_false',
+                        help='To process the entire data or a sample of it')
+    parser.add_argument('--sample-size', dest='sample_size', default=500, type=int,
+                        help='Sample size to use for testing processing script')
     args = parser.parse_args()
 
     main(args)

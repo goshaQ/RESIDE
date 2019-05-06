@@ -8,18 +8,16 @@ import sys
 import time
 from collections import defaultdict
 
-import tensorflow as tf
-from bert import run_classifier_with_tfhub
-import tensorflow_hub as hub
-
+import gensim
 import numpy as np
+import tensorflow as tf
 from orderedset import OrderedSet
 from scipy.spatial.distance import cdist
 
 sys.path.append('./')
 
 from helper import mergeList, createModel, createTokenizer, prepareInputBERT, \
-    buildPhr2ELMoGraph, getPhr2ELMo, buildPhr2BERTGraph, getPhr2BERT
+    buildPhr2ELMoGraph, getPhr2ELMo, buildPhr2BERTGraph, getPhr2BERT, getPhr2vec
 
 parser = argparse.ArgumentParser(description='Main Preprocessing program')
 parser.add_argument('--test', dest="FULL", action='store_false')
@@ -34,14 +32,18 @@ parser.add_argument('--thresh', dest="thresh", default=0.65, type=float)
 parser.add_argument('--nfinetype', dest='wFineType', action='store_false')
 parser.add_argument('--metric', default='cosine')
 parser.add_argument('--data', default='riedel')
-parser.add_argument('--log_steps', default=10000, type=int, help='Logging frequency in steps')
+parser.add_argument('--log-steps', default=10000, type=int, help='Logging frequency in steps')
 parser.add_argument('--seed', dest="seed", default=1234, type=int, help='Seed for randomization')
 
-# Change the below two arguments together
-parser.add_argument('--max_seq_length', default=48, type=int,
+# Embeddings parameters
+parser.add_argument('--max-seq-length', default=48, type=int,
                     help='The length of sequence tokens')
 parser.add_argument('--embed-type', default='ELMo',
-                    help='Embeddings type (ELMo or BERT)')
+                    help='Embeddings type (GloVe, ELMo or BERT)')
+
+parser.add_argument('--embed-dim', default=50, type=int)
+parser.add_argument('--pretrained-glove',
+                    default='./glove/glove.6B.50d_word2vec.txt')
 parser.add_argument('--pretrained-elmo-model',
                     default='https://tfhub.dev/google/elmo/2',
                     help='Path to the pretrained ELMo model on TF Hub')
@@ -68,7 +70,10 @@ with open(f'./preproc/{args.data}_relation2id.json') as f:
 alias2rel = defaultdict(set)
 alias2id = {}
 
-if args.embed_type == 'ELMo':
+if args.embed_type == 'GloVe':
+    embed_model = gensim.models.KeyedVectors.load_word2vec_format(args.pretrained_glove, binary=False)
+    tokenizer = None
+elif args.embed_type == 'ELMo':
     embed_model = createModel(args.pretrained_elmo_model)
     tokenizer = None
 elif args.embed_type == 'BERT':
@@ -94,12 +99,13 @@ for rel, aliases in rel2alias.items():
 temp = sorted(alias2id.items(), key=lambda x: x[1])
 alias_list, _ = zip(*temp)
 
-if args.embed_type == 'ELMo':
+if args.embed_type == 'GloVe':
+    alias_embed = getPhr2vec(embed_model, alias_list, args.embed_dim)
+elif args.embed_type == 'ELMo':
     elmo_inputs, elmo_outputs = buildPhr2ELMoGraph(embed_model)
     alias_embed = getPhr2ELMo(elmo_inputs, elmo_outputs, alias_list, sess)
 elif args.embed_type == 'BERT':
     alias_list = prepareInputBERT(tokenizer, alias_list, args.max_seq_length)
-
     bert_inputs, bert_outputs = buildPhr2BERTGraph(embed_model, args.max_seq_length)
     alias_embed = getPhr2BERT(bert_inputs, bert_outputs, alias_list, sess)
 
@@ -351,7 +357,9 @@ def get_alias2rel_batch(phr_list, args, batch_split_indices, bag_split_indices, 
     for i in range(0, len(phr_list), batch_size):
         phr_list_i = phr_list[i:i+batch_size]
 
-        if args.embed_type == 'ELMo':
+        if args.embed_type == 'GloVe':
+            phr_embed = getPhr2vec(embed_model, phr_list_i, args.embed_dim)
+        elif args.embed_type == 'ELMo':
             phr_embed = getPhr2ELMo(elmo_inputs, elmo_outputs, phr_list_i, sess)
         else:
             phr_embed = getPhr2BERT(bert_inputs, bert_outputs, phr_list_i, sess)
@@ -458,7 +466,26 @@ def getIdMap(vals, begin_idx=0):
     return ele2id
 
 
-vocab = {} if args.embed_type == 'ELMo' else tokenizer.vocab
+if args.embed_type == 'GloVe':
+    voc_freq = defaultdict(int)
+    for bag in data['train']:
+        for wrds in bag['wrds_list']:
+            for wrd in wrds:
+                voc_freq[wrd] += 1
+
+    freq = list(voc_freq.items())
+    freq.sort(key=lambda x: x[1], reverse=True)
+    freq = freq[:args.MAX_VOCAB]
+    vocab, _ = map(list, zip(*freq))
+
+    vocab.append('UNK')
+
+    vocab = getIdMap(vocab, 1)
+elif args.embed_type == 'ELMo':
+    vocab = {}
+else:
+    vocab = tokenizer.vocab
+
 voc2id = vocab
 id2voc = dict([(v, k) for k, v in voc2id.items()])
 
@@ -492,9 +519,15 @@ def procData(dataset):
 
     for bag in dataset:
         # Labels will be K - hot
+        if args.embed_type == 'GloVe':
+            X = [[getId(wrd, voc2id, 'UNK') for wrd in wrds] for wrds in bag['wrds_list']]
+        elif args.embed_type == 'ELMo':
+            X = bag['sents']
+        else:
+            X = [[getId(wrd, voc2id, '[UNK]') for wrd in wrds] for wrds in bag['wrds_list']],
+
         res = {
-            'X': bag['sents'] if args.embed_type == 'ELMo'
-            else [[getId(wrd, voc2id, '[UNK]') for wrd in wrds] for wrds in bag['wrds_list']],
+            'X': X,
             'Pos1': [[posMap(pos) for pos in pos1] for pos1 in bag['pos1_list']],
             'Pos2': [[posMap(pos) for pos in pos2] for pos2 in bag['pos2_list']],
             'Y': bag['rels'],
