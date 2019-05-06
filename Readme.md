@@ -108,25 +108,3 @@ Improvements over original [RESIDE](https://github.com/malllabiisc/RESIDE) model
   - [riedel_test_bags.json](https://drive.google.com/open?id=1tIczJKU5NrZJvR-XHUEh7IrFrvbS_aHn) and other required [files](https://drive.google.com/open?id=17UNttRDo14O_Zgfr6y9tvY57fc0BGEjw) can be downloaded from the provided links.
 
   ![](./images/demo.png)
-
-### Citation:
-Please cite the following paper if you use this code in your work.
-
-```tex
-@InProceedings{reside2018,
-  author = 	"Vashishth, Shikhar
-		and Joshi, Rishabh
-		and Prayaga, Sai Suman
-		and Bhattacharyya, Chiranjib
-		and Talukdar, Partha",
-  title = 	"{RESIDE}: Improving Distantly-Supervised Neural Relation Extraction using Side Information",
-  booktitle = 	"Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing",
-  year = 	"2018",
-  publisher = 	"Association for Computational Linguistics",
-  pages = 	"1257--1266",
-  location = 	"Brussels, Belgium",
-  url = 	"http://aclweb.org/anthology/D18-1157"
-}
-```
-
-For any clarification, comments, or suggestions please create an issue or contact [shikhar@iisc.ac.in](http://shikhar-vashishth.github.io).
