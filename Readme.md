@@ -6,6 +6,10 @@ Source code for [EMNLP 2018](http://emnlp2018.org) paper: [RESIDE: Improving Dis
 ![](https://github.com/malllabiisc/RESIDE/blob/master/images/overview.png)*Overview of RESIDE (proposed method): RESIDE first encodes each sentence in the bag by concatenating embeddings (denoted by ⊕) from Bi-GRU and Syntactic GCN for each token, followed by word attention.*
 *Then, sentence embedding is concatenated with relation alias information, which comes from the Side Information Acquisition Section, before computing attention over sentences. Finally, bag representation with entity type information is fed to a softmax classifier. Please refer to paper for more details.* 
 
+### Updates
+Improvements over original [RESIDE](https://github.com/malllabiisc/RESIDE) model:
+- support for ELMo embeddings
+
 ### Dependencies
 
 - Compatible with TensorFlow 1.x and Python 3.x.
@@ -48,7 +52,7 @@ Source code for [EMNLP 2018](http://emnlp2018.org) paper: [RESIDE: Improving Dis
   * `rel2id` is the mapping of relation to its id. 
   * `max_pos` is the maximum position to consider for positional embeddings.
   * Each entry of `train`, `test` and `valid` is a bag of sentences, where
-    * `X` denotes the sentences in bag as the list of list of word indices.
+    * `X` denotes the sentences in bag as the list of list of word indices for GloVe and list of text sentences for ELMo.
     * `Y` is the relation expressed by the sentences in the bag.
     * `Pos1` and `Pos2` are position of each word in sentences wrt to target entity 1 and entity 2.
     * `SubPos` and `ObjPos` contains the position of the target entity 1 and entity 2 in each sentence.
@@ -73,18 +77,21 @@ Source code for [EMNLP 2018](http://emnlp2018.org) paper: [RESIDE: Improving Dis
 
 ### Training from scratch:
 - Execute `setup.sh` for downloading GloVe embeddings.
+- Execute `load_pickle_glove.sh` to load preprocessed dataset for RESIDE-GloVe model.
+- Execute `load_pickle_elmo.sh` to load preprocessed dataset for RESIDE-ELMo model.
 - For training **RESIDE** run:
   ```shell
-  python reside.py -data data/riedel_processed.pkl -name new_run
+  python reside.py --data data/riedel_processed_elmo.pkl --name new_run
   ```
+- By default, ELMo embeddings are used. To run with GloVe embeddings add `--embed_type GloVe`
 
 * The above model needs to be further trained with SGD optimizer for few epochs to match the performance reported in the paper. For that execute
 
   ```shell
-  python reside.py -name new_run -restore -opt sgd -lr 0.001 -l2 0.0 -epoch 4
+  python reside.py --name new_run --restore -opt sgd --lr 0.001 -l2 0.0 -epoch 4
   ```
 
-* Finally, run `python plot_pr.py -name new_run` to get the plot.
+* Finally, run `python plot_pr.py --name new_run` to get the plot.
 
 ### Preprocessing a new dataset:
 
