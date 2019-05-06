@@ -286,15 +286,13 @@ class RESIDE(object):
         -------
         Padded data and mask
         """
-        pad_data = np.empty((len(data), seq_len), np.str)
-        mask = np.zeros(seq_len, np.int32)
+        pad_data = [['' for _ in range(seq_len)] for _ in range(len(data))]
+        mask = [0 for _ in range(len(data))]
 
-        print(pad_data)
         for i, ele in enumerate([x.split() for x in data]):
-            pad_data[i, :len(ele)] = ele[:seq_len]
+            pad_data[i][:len(ele)] = ele[:seq_len]
             mask[i] = len(ele[:seq_len])
 
-        print('PAD_DATA', pad_data)
         return pad_data, mask
 
     def getOneHot(self, data, num_class, isprob=False):
@@ -918,7 +916,6 @@ class RESIDE(object):
 
         for step, batch in enumerate(self.getBatches(data, shuffle)):
             feed = self.create_feed_dict(batch)
-            print('DIMMM', feed[self.input_x])
             summary_str, loss, accuracy, _ = sess.run([self.merged_summ, self.loss, self.accuracy, self.train_op],
                                                       feed_dict=feed)
 
